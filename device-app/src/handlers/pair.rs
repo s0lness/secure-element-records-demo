@@ -3,7 +3,6 @@ use crate::session::{PairState, Role, Session};
 use crate::AppSW;
 use alloc::format;
 use ledger_device_sdk::io::{Command, CommandResponse};
-use ledger_device_sdk::nbgl::NbglChoice;
 
 /// PAIR_COMMIT (master): begin, return SHA256 commitment to our ephemeral.
 pub fn handler_commit<'a>(
@@ -101,7 +100,7 @@ pub fn handler_sas<'a>(
     let words = session.sas_words();
     let message = format!("{}\n{}\n{}\n{}", words[0], words[1], words[2], words[3]);
     let comm = command.into_comm();
-    let approved = NbglChoice::new().show(
+    let approved = crate::app_ui::menu::ceremony_choice().show(
         comm,
         &message,
         "Confirm only if the other device\nshows exactly these words.",

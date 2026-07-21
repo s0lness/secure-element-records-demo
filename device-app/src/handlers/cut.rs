@@ -4,7 +4,6 @@ use crate::state::Store;
 use crate::AppSW;
 use alloc::format;
 use ledger_device_sdk::io::{Command, CommandResponse};
-use ledger_device_sdk::nbgl::NbglChoice;
 
 /// CUT: data = edition(u16 LE) || title(1..=32 bytes utf-8).
 /// UI-gated. One master per device; re-cutting requires RESET_MASTER first.
@@ -34,7 +33,7 @@ pub fn handler_cut(command: Command<'_>) -> Result<CommandResponse<'_>, AppSW> {
         edition
     );
     let comm = command.into_comm();
-    let approved = NbglChoice::new().show(comm, &message, &submessage, "Cut the master", "Cancel");
+    let approved = crate::app_ui::menu::ceremony_choice().show(comm, &message, &submessage, "Cut the master", "Cancel");
     if !approved {
         return Err(AppSW::Deny);
     }
@@ -64,7 +63,7 @@ pub fn handler_reset_master(command: Command<'_>) -> Result<CommandResponse<'_>,
         return Err(AppSW::NoMaster);
     }
     let comm = command.into_comm();
-    let approved = NbglChoice::new().show(
+    let approved = crate::app_ui::menu::ceremony_choice().show(
         comm,
         "Destroy the plates?",
         "The album key is erased forever.\nNo further pressing will ever exist.",

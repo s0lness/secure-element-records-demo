@@ -7,7 +7,6 @@ use crate::state::Store;
 use crate::AppSW;
 use alloc::format;
 use ledger_device_sdk::io::{Command, CommandResponse};
-use ledger_device_sdk::nbgl::NbglChoice;
 
 const MAC_LEN: usize = 32;
 
@@ -100,7 +99,7 @@ pub fn handler_press_offer<'a>(
     let message = format!("Press {}\n{} of {}?", title, number, nvm.edition);
     let submessage = format!("For device {}.\n{} pressings will remain.", fp, nvm.counter - 1);
     let comm = command.into_comm();
-    let approved = NbglChoice::new().show(comm, &message, &submessage, "Press this copy", "Cancel");
+    let approved = crate::app_ui::menu::ceremony_choice().show(comm, &message, &submessage, "Press this copy", "Cancel");
     if !approved {
         return Err(AppSW::Deny);
     }
@@ -182,7 +181,7 @@ pub fn handler_press_accept<'a>(
     let title = title_str(&album.title, album.title_len)?;
     let message = format!("Receive {}\n{} of {}?", title, pressing.number, pressing.edition);
     let comm = command.into_comm();
-    let approved = NbglChoice::new().show(
+    let approved = crate::app_ui::menu::ceremony_choice().show(
         comm,
         &message,
         "This pressing is bound to\nthis device forever.",

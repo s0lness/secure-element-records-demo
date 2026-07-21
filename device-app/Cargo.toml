@@ -25,8 +25,8 @@ path = ["44'/1'"]
 name = "Presse"
 nanosplus = { icon = "icons/crab_14x14.gif" }
 nanox = { icon = "icons/crab_14x14.gif" }
-stax = { icon = "icons/crab_32x32.gif" }
-flex = { icon = "icons/crab_40x40.gif" }
+stax = { icon = "icons/vinyl_32x32.gif" }
+flex = { icon = "icons/vinyl_40x40.gif" }
 apex_p = { icon = "icons/crab_32x32.png" }
 
 [lints.rust]

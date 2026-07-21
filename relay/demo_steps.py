@@ -100,10 +100,25 @@ def gated(p, ins, data, wait_text, who):
     return split_sw(r["data"])
 
 
+def cockpit_running() -> bool:
+    try:
+        requests.get("http://127.0.0.1:5050/log", timeout=1)
+        return True
+    except requests.RequestException:
+        return False
+
+
 def main():
     step = sys.argv[1] if len(sys.argv) > 1 else "help"
-    a = Presse(LiveDevice("flex-a", 5001))
-    b = Presse(LiveDevice("flex-b", 5002))
+    if cockpit_running():
+        # Route through the cockpit so the wire feed shows the real traffic.
+        a = Presse(LiveDevice("flex-a", 5050))
+        b = Presse(LiveDevice("flex-b", 5050))
+        a.dev.url = "http://127.0.0.1:5050/a"
+        b.dev.url = "http://127.0.0.1:5050/b"
+    else:
+        a = Presse(LiveDevice("flex-a", 5001))
+        b = Presse(LiveDevice("flex-b", 5002))
 
     if step == "cut":
         title = sys.argv[2] if len(sys.argv) > 2 else "Nuits Roses"
