@@ -5,7 +5,12 @@
 //! handle user interactions, and display information on Ledger devices.
 
 use crate::io::{ApduHeader, Event};
-use crate::io_callbacks::nbgl_next_event_ahead;
+/// Re-exported: an application that builds its own NBGL object tree
+/// (`nbgl_objPoolGet` / `nbgl_screenSet`, for a layout no page template
+/// covers) has to run its own event loop, and needs the same APDU-aware poll
+/// the wrapper widgets use in `SyncNBGL::ux_sync_wait`. Without it such a
+/// screen deadlocks against the host until the user touches it.
+pub use crate::io_callbacks::nbgl_next_event_ahead;
 use crate::nvm::*;
 use const_zero::const_zero;
 extern crate alloc;
