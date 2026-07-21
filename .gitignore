@@ -1,0 +1,3 @@
+device-app/target/
+__pycache__/
+*.pyc
