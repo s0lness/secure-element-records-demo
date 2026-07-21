@@ -1,4 +1,4 @@
-Flex A shows: riddle / unicorn / drumbeat / sprout
-Flex B shows: riddle / unicorn / drumbeat / sprout
+Flex A shows: sleigh / firefly / temple / melon
+Flex B shows: sleigh / firefly / temple / melon
 >> compare, then tap 'Words match' on BOTH pages
 channel authenticated.

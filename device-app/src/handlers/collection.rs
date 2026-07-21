@@ -142,3 +142,46 @@ pub fn handler_collection(command: Command<'_>) -> Result<CommandResponse<'_>, A
     let response = command.into_response();
     Ok(response)
 }
+
+/// ART_TEST: go/no-go prototype for runtime bitmaps. Renders a 96x96 4bpp
+/// image computed on the fly (rings + asymmetric corner marker to reveal the
+/// nibble order) inside an album card. If this displays, uploaded cover art
+/// is feasible.
+#[cfg(any(target_os = "stax", target_os = "flex"))]
+pub fn handler_art_test(command: Command<'_>) -> Result<CommandResponse<'_>, AppSW> {
+    const W: usize = 96;
+    let mut bitmap = alloc::vec![0u8; W * W / 2];
+    for y in 0..W {
+        for x in 0..W {
+            let dx = x as i32 - 48;
+            let dy = y as i32 - 48;
+            let d2 = dx * dx + dy * dy;
+            // Concentric rings, plus a solid dark square in the top-left
+            // corner to detect flipped nibble/byte order at a glance.
+            let mut shade: u8 = if d2 < 46 * 46 { ((d2 / 300) % 16) as u8 } else { 15 };
+            if x < 16 && y < 16 {
+                shade = 0;
+            }
+            let idx = (y * W + x) / 2;
+            if x % 2 == 0 {
+                bitmap[idx] = (bitmap[idx] & 0x0F) | (shade << 4);
+            } else {
+                bitmap[idx] = (bitmap[idx] & 0xF0) | shade;
+            }
+        }
+    }
+    let glyph = ledger_device_sdk::nbgl::NbglGlyph::new(&bitmap, W as u16, W as u16, 4, false);
+    NbglGenericReview::new()
+        .add_content(NbglPageContent::CenteredInfo(CenteredInfo::new(
+            "Runtime art",
+            "computed on device",
+            "not a compiled glyph",
+            Some(&glyph),
+            false,
+            CenteredInfoStyle::LargeCaseBoldInfo,
+            0,
+        )))
+        .show_from_callback("Back");
+    let response = command.into_response();
+    Ok(response)
+}
