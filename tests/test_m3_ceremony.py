@@ -55,9 +55,14 @@ def test_full_ceremony_and_offline_verification(ceremony):
     assert result == {"title": TITLE, "number": 1, "edition": EDITION}
     verify_possession(receiver, pressing_cert)
 
-    # On-device collection screens: the master lists what it pressed and for
-    # whom; the receiver shows what it holds.
+    # On-device collection: an album card first (big art, edition line), the
+    # detail list on the next page (navigate like a finger would).
+    NEXT_PAGE = (430, 550)
+
     thread, res = master.dev.apdu_async_start(apdu_hex(INS_COLLECTION))
+    assert master.dev.wait_for_text("My master, edition of")
+    assert master.dev.wait_for_text("left to press")
+    master.dev.finger(*NEXT_PAGE)
     assert master.dev.wait_for_text("Still to press")
     assert master.dev.wait_for_text("Pressed 1 of")
     assert master.dev.wait_for_text("for device ")
@@ -66,8 +71,10 @@ def test_full_ceremony_and_offline_verification(ceremony):
     assert split_sw(res["data"])[1] == SW_OK
 
     thread, res = receiver.dev.apdu_async_start(apdu_hex(INS_COLLECTION))
-    assert receiver.dev.wait_for_text("In my collection")
+    assert receiver.dev.wait_for_text("Pressing 1 of")
     assert receiver.dev.wait_for_text(TITLE)
+    receiver.dev.finger(*NEXT_PAGE)
+    assert receiver.dev.wait_for_text("In my collection")
     receiver.tap_text("Back")
     thread.join(timeout=30)
     assert split_sw(res["data"])[1] == SW_OK
