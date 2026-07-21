@@ -5,7 +5,7 @@
 use crate::certs::{ALBUM_CERT_LEN, PRESSING_CERT_LEN, TITLE_MAX};
 use crate::crypto::{self, PUBKEY_LEN};
 use crate::AppSW;
-use ledger_device_sdk::nvm::{AtomicStorage, SingleStorage};
+use ledger_device_sdk::nvm::{AlignedStorage, AtomicStorage, SingleStorage};
 use ledger_device_sdk::NVMData;
 
 /// How many issued pressings the master keeps on record for the on-device
@@ -39,6 +39,10 @@ pub struct PresseNvm {
     pub has_pressing: u8,
     pub pressing_cert: [u8; PRESSING_CERT_LEN],
     pub pressing_album_cert: [u8; ALBUM_CERT_LEN],
+
+    /// Cover art bound to the album this device knows (master or pressing).
+    pub has_art: u8,
+    pub art_hash: [u8; 32],
 }
 
 const EMPTY: PresseNvm = PresseNvm {
@@ -60,10 +64,61 @@ const EMPTY: PresseNvm = PresseNvm {
     has_pressing: 0,
     pressing_cert: [0; PRESSING_CERT_LEN],
     pressing_album_cert: [0; ALBUM_CERT_LEN],
+    has_art: 0,
+    art_hash: [0; 32],
 };
 
 #[link_section = ".nvm_data"]
 static mut DATA: NVMData<AtomicStorage<PresseNvm>> = NVMData::new(AtomicStorage::new(&EMPTY));
+
+/// Cover art: a square 1bpp sleeve. Kept out of `PresseNvm` because that
+/// struct is copied through the stack on every read.
+/// 160x160 is the largest square that still boots: the app's NVRAM data
+/// region tops out at 32256 bytes (63 pages), and 192x192 pushes it to 32768,
+/// where the loader accepts the app but it exits before the first APDU.
+pub const ART_W: usize = 160;
+pub const ART_BPP: usize = 1;
+pub const ART_LEN: usize = ART_W * ART_W / 8;
+
+/// Stored as page-aligned cells and written one cell at a time: the SDK's
+/// storage wrappers are the only supported way to reach flash.
+pub const ART_CHUNK: usize = 64;
+pub const ART_CELLS: usize = ART_LEN / ART_CHUNK;
+
+#[link_section = ".nvm_data"]
+static mut ART: NVMData<[AlignedStorage<[u8; ART_CHUNK]>; ART_CELLS]> =
+    NVMData::new([AlignedStorage::new([0u8; ART_CHUNK]); ART_CELLS]);
+
+pub struct Art;
+
+impl Art {
+    /// Borrow the stored art. The cells are contiguous in flash, so the
+    /// first cell's address is the start of a single ART_LEN bitmap: this is
+    /// what lets NBGL render straight out of NVM, with no RAM copy.
+    pub fn get() -> &'static [u8; ART_LEN] {
+        let data = &raw const ART;
+        unsafe {
+            let first = (*data).get_ref()[0].get_ref().as_ptr();
+            &*(first as *const [u8; ART_LEN])
+        }
+    }
+
+    /// Burn one chunk at `offset` through the NVM write syscall (a plain
+    /// slice assignment would not reach flash). A partial upload leaves
+    /// partial art, which the album hash check then rejects.
+    pub fn write_chunk(offset: usize, chunk: &[u8]) -> Result<(), AppSW> {
+        if chunk.len() != ART_CHUNK || offset % ART_CHUNK != 0 || offset + chunk.len() > ART_LEN {
+            return Err(AppSW::WrongApduLength);
+        }
+        let mut cell = [0u8; ART_CHUNK];
+        cell.copy_from_slice(chunk);
+        let data = &raw mut ART;
+        unsafe {
+            (*data).get_mut()[offset / ART_CHUNK].update(&cell);
+        }
+        Ok(())
+    }
+}
 
 pub struct Store;
 
