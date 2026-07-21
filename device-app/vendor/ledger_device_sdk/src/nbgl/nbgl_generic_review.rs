@@ -564,7 +564,7 @@ impl NbglGenericReview {
             .collect()
     }
 
-    fn show_internal(&self, reject_button_str: &str) -> bool {
+    fn show_internal(&self, reject_button_str: &str, exit_on_apdu: bool) -> bool {
         unsafe {
             let c_content_list: Vec<nbgl_content_t> = self.to_c_content_list();
 
@@ -584,7 +584,7 @@ impl NbglGenericReview {
                 reject_button_cstring.as_ptr() as *const c_char,
                 Some(rejected_callback),
             );
-            let sync_ret = self.ux_sync_wait(false);
+            let sync_ret = self.ux_sync_wait(exit_on_apdu);
 
             // Return true if the user approved the transaction, false otherwise.
             matches!(sync_ret, SyncNbgl::UxSyncRetApproved)
@@ -608,15 +608,17 @@ impl NbglGenericReview {
         _comm: &mut crate::io::Comm<N>,
         reject_button_str: &str,
     ) -> bool {
-        self.show_internal(reject_button_str)
+        self.show_internal(reject_button_str, false)
     }
 
     /// Shows the review from an NBGL callback context (e.g. a home action
-    /// button), where no `Comm` handle is reachable. Rendering and behavior
-    /// are identical to [`Self::show`].
+    /// button), where no `Comm` handle is reachable. Rendering is identical
+    /// to [`Self::show`], but the screen also closes itself when an APDU
+    /// arrives, so a host command can never deadlock against it: the caller
+    /// redraws its idle screen and the main loop handles the APDU.
     #[cfg(feature = "io_new")]
     pub fn show_from_callback(&self, reject_button_str: &str) -> bool {
-        self.show_internal(reject_button_str)
+        self.show_internal(reject_button_str, true)
     }
 
     /// Displays the review to the user and blocks until a decision is made.
@@ -631,6 +633,6 @@ impl NbglGenericReview {
     ///   at the end of the review flow (e.g. `"Reject transaction"`).
     #[cfg(not(feature = "io_new"))]
     pub fn show(&self, reject_button_str: &str) -> bool {
-        self.show_internal(reject_button_str)
+        self.show_internal(reject_button_str, false)
     }
 }
