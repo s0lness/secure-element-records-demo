@@ -1,4 +1,4 @@
-Flex A shows: sardine / kiwi / hexagon / eclipse
-Flex B shows: sardine / kiwi / hexagon / eclipse
+Flex A shows: acrobat / pagoda / raven / phantom
+Flex B shows: acrobat / pagoda / raven / phantom
 >> compare, then tap 'Words match' on BOTH pages
 channel authenticated.

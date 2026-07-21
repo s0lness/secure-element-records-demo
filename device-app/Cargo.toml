@@ -7,6 +7,11 @@ edition = "2021"
 [dependencies]
 ledger_device_sdk = {version = "*", features = ["io_new"]}
 
+# Vendored copy carrying the home action-button support (candidate upstream
+# PR to ledger-device-rust-sdk; keep the diff minimal and PR-shaped).
+[patch.crates-io]
+ledger_device_sdk = { path = "vendor/ledger_device_sdk" }
+
 [build-dependencies]
 # Decode the source GIFs and write the processed grayscale PNG glyph without
 # pulling the full `image` crate (and its color-management stack). The luma

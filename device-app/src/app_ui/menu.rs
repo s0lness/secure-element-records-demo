@@ -53,7 +53,37 @@ pub fn ui_menu_main(_: &mut Comm) -> NbglHomeAndSettings {
     NbglHomeAndSettings::new()
         .glyph(&RECORD)
         .tagline(&tagline())
+        .action("My records", None, on_my_records)
         .infos("Presse", env!("CARGO_PKG_VERSION"), env!("CARGO_PKG_AUTHORS"))
+}
+
+/// The home drawn from the NBGL callback must outlive the draw call (NBGL
+/// keeps pointers into its strings). Heap-allocated and tracked through an
+/// atomic so the static stays zero-initialized (.bss: this target forbids a
+/// .data section). Single UI thread.
+static CALLBACK_HOME: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+
+/// Home action button: draw the collection, then put the home back up.
+/// Runs inside the NBGL event loop, no Comm in reach.
+fn on_my_records() {
+    let _ = crate::handlers::collection::show_collection_screen();
+    let home = alloc::boxed::Box::new(
+        NbglHomeAndSettings::new()
+            .glyph(&RECORD)
+            .tagline(&tagline())
+            .action("My records", None, on_my_records)
+            .infos("Presse", env!("CARGO_PKG_VERSION"), env!("CARGO_PKG_AUTHORS")),
+    );
+    let ptr = alloc::boxed::Box::into_raw(home);
+    unsafe {
+        (*ptr).show_and_return();
+    }
+    // The previous callback-home's strings are no longer referenced once the
+    // new home is on screen; release it only now.
+    let old = CALLBACK_HOME.swap(ptr as usize, core::sync::atomic::Ordering::Relaxed);
+    if old != 0 {
+        drop(unsafe { alloc::boxed::Box::from_raw(old as *mut NbglHomeAndSettings) });
+    }
 }
 
 /// The confirmation page used by every ceremony, vinyl front and center.

@@ -79,9 +79,7 @@ impl Store {
             current.dev_priv = sk;
             current.dev_pub = pk;
             current.initialized = 1;
-            unsafe {
-                storage.update(&current);
-            }
+            storage.update(&current);
         }
         Ok(current)
     }
@@ -90,8 +88,6 @@ impl Store {
     pub fn put(new_state: &PresseNvm) {
         let data = &raw mut DATA;
         let storage = unsafe { (*data).get_mut() };
-        unsafe {
-            storage.update(new_state);
-        }
+        storage.update(new_state);
     }
 }

@@ -12,12 +12,8 @@ fn title_str(title: &[u8], title_len: u8) -> Result<&str, AppSW> {
     core::str::from_utf8(&title[..title_len as usize]).map_err(|_| AppSW::BadCert)
 }
 
-/// COLLECTION: browsable on-device view of what this device holds: the master
-/// and its issued pressings, and the pressing bound to this device. Pages
-/// paginate under NBGL; the footer button leaves the screen.
-pub fn handler_collection(command: Command<'_>) -> Result<CommandResponse<'_>, AppSW> {
+fn collection_fields() -> Result<(Vec<String>, Vec<String>), AppSW> {
     let nvm = Store::get()?;
-
     let mut names: Vec<String> = Vec::new();
     let mut values: Vec<String> = Vec::new();
 
@@ -44,8 +40,7 @@ pub fn handler_collection(command: Command<'_>) -> Result<CommandResponse<'_>, A
     if nvm.has_pressing == 1 {
         let album = parse_album_cert(&nvm.pressing_album_cert)?;
         let title = title_str(&album.title, album.title_len)?;
-        let pressing =
-            crate::certs::parse_pressing_cert(&nvm.pressing_cert, &album.albpub)?;
+        let pressing = crate::certs::parse_pressing_cert(&nvm.pressing_cert, &album.albpub)?;
         names.push(String::from("In my collection"));
         values.push(format!(
             "{}, {} of {}",
@@ -57,7 +52,13 @@ pub fn handler_collection(command: Command<'_>) -> Result<CommandResponse<'_>, A
         names.push(String::from("Collection"));
         values.push(String::from("Empty. Cut a master or receive a pressing."));
     }
+    Ok((names, values))
+}
 
+/// Draws the collection screen and blocks until "Back". Callable both from
+/// the APDU handler and from the home action button's NBGL callback.
+pub fn show_collection_screen() -> Result<(), AppSW> {
+    let (names, values) = collection_fields()?;
     let fields: Vec<Field> = names
         .iter()
         .zip(values.iter())
@@ -67,13 +68,18 @@ pub fn handler_collection(command: Command<'_>) -> Result<CommandResponse<'_>, A
         })
         .collect();
 
-    let comm = command.into_comm();
     NbglGenericReview::new()
         .add_content(NbglPageContent::TagValueList(TagValueList::new(
             &fields, 0, false, true,
         )))
-        .show(comm, "Back");
+        .show_from_callback("Back");
+    Ok(())
+}
 
-    let response = comm.begin_response();
+/// COLLECTION over APDU: same screen, host-triggered (used by tests and the
+/// relay demos).
+pub fn handler_collection(command: Command<'_>) -> Result<CommandResponse<'_>, AppSW> {
+    show_collection_screen()?;
+    let response = command.into_response();
     Ok(response)
 }

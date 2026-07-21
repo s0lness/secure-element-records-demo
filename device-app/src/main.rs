@@ -30,7 +30,7 @@ mod handlers {
 }
 
 use app_ui::menu::ui_menu_main;
-use ledger_device_sdk::io::{self, init_comm, ApduHeader, Comm, Command, Reply, StatusWords};
+use ledger_device_sdk::io::{self, init_comm, ApduHeader, Command, Reply, StatusWords};
 use session::Session;
 
 ledger_device_sdk::set_panic!(ledger_device_sdk::exiting_panic);
