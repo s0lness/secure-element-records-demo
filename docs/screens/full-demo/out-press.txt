@@ -1,0 +1,3 @@
+>> confirm on Flex A (tap the screen in its browser page)
+>> confirm on Flex B (tap the screen in its browser page)
+pressed. 4 remain in the master.

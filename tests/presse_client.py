@@ -15,6 +15,7 @@ from ecdsa.util import sigdecode_der
 CLA = 0xB5
 
 INS_GET_INFO = 0x01
+INS_COLLECTION = 0x02
 INS_CUT = 0x10
 INS_PAIR_COMMIT = 0x21
 INS_PAIR_RESPOND = 0x22

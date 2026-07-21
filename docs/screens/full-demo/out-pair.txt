@@ -1,0 +1,4 @@
+Flex A shows: kiwi / cinema / meadow / pepper
+Flex B shows: kiwi / cinema / meadow / pepper
+>> compare, then tap 'Words match' on BOTH pages
+channel authenticated.

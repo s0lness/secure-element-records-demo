@@ -8,6 +8,18 @@ use crate::AppSW;
 use ledger_device_sdk::nvm::{AtomicStorage, SingleStorage};
 use ledger_device_sdk::NVMData;
 
+/// How many issued pressings the master keeps on record for the on-device
+/// collection screen (the counter itself has no such limit).
+pub const PRESSED_LOG_LEN: usize = 8;
+
+#[derive(Clone, Copy)]
+pub struct PressedEntry {
+    pub number: u16,
+    /// First 4 bytes of SHA256(recipient devpub): the fingerprint shown at
+    /// press time, so the screens tell one consistent story.
+    pub recipient_fp: [u8; 4],
+}
+
 #[derive(Clone, Copy)]
 pub struct PresseNvm {
     pub initialized: u8,
@@ -22,6 +34,7 @@ pub struct PresseNvm {
     pub edition: u16,
     pub counter: u16,
     pub album_cert: [u8; ALBUM_CERT_LEN],
+    pub pressed_log: [PressedEntry; PRESSED_LOG_LEN],
 
     pub has_pressing: u8,
     pub pressing_cert: [u8; PRESSING_CERT_LEN],
@@ -40,6 +53,10 @@ const EMPTY: PresseNvm = PresseNvm {
     edition: 0,
     counter: 0,
     album_cert: [0; ALBUM_CERT_LEN],
+    pressed_log: [PressedEntry {
+        number: 0,
+        recipient_fp: [0; 4],
+    }; PRESSED_LOG_LEN],
     has_pressing: 0,
     pressing_cert: [0; PRESSING_CERT_LEN],
     pressing_album_cert: [0; ALBUM_CERT_LEN],

@@ -81,6 +81,10 @@ pub fn handler_reset_master(command: Command<'_>) -> Result<CommandResponse<'_>,
     nvm.edition = 0;
     nvm.counter = 0;
     nvm.album_cert = [0; crate::certs::ALBUM_CERT_LEN];
+    nvm.pressed_log = [crate::state::PressedEntry {
+        number: 0,
+        recipient_fp: [0; 4],
+    }; crate::state::PRESSED_LOG_LEN];
     Store::put(&nvm);
     let response = comm.begin_response();
     Ok(response)

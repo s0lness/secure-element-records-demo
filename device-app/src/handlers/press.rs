@@ -18,14 +18,17 @@ fn title_str(title: &[u8], title_len: u8) -> Result<&str, AppSW> {
     core::str::from_utf8(&title[..title_len as usize]).map_err(|_| AppSW::BadCert)
 }
 
-/// Short human-readable device fingerprint: first 8 hex chars of
-/// SHA256(devpub).
-fn fingerprint(devpub: &[u8; PUBKEY_LEN]) -> Result<alloc::string::String, AppSW> {
+/// First 4 bytes of SHA256(devpub): the device fingerprint, shown as 8 hex
+/// chars wherever a recipient is named.
+fn fingerprint_bytes(devpub: &[u8; PUBKEY_LEN]) -> Result<[u8; 4], AppSW> {
     let hash = crypto::sha256(&[devpub])?;
-    Ok(format!(
-        "{:02X}{:02X}{:02X}{:02X}",
-        hash[0], hash[1], hash[2], hash[3]
-    ))
+    let mut fp = [0u8; 4];
+    fp.copy_from_slice(&hash[..4]);
+    Ok(fp)
+}
+
+pub fn fingerprint_str(fp: &[u8; 4]) -> alloc::string::String {
+    format!("{:02X}{:02X}{:02X}{:02X}", fp[0], fp[1], fp[2], fp[3])
 }
 
 /// GET_ALBUM (master, paired): AlbumCert || MAC.
@@ -94,7 +97,8 @@ pub fn handler_press_offer<'a>(
     recvpub.copy_from_slice(payload);
     let number = nvm.edition - nvm.counter + 1;
     let title = title_str(&nvm.title, nvm.title_len)?;
-    let fp = fingerprint(&recvpub)?;
+    let fp_bytes = fingerprint_bytes(&recvpub)?;
+    let fp = fingerprint_str(&fp_bytes);
 
     let message = format!("Press {}\n{} of {}?", title, number, nvm.edition);
     let submessage = format!("For device {}.\n{} pressings will remain.", fp, nvm.counter - 1);
@@ -108,6 +112,13 @@ pub fn handler_press_offer<'a>(
     let cert = build_pressing_cert(&nvm.alb_priv, &album_id, number, nvm.edition, &recvpub)?;
 
     nvm.counter -= 1;
+    let log_idx = (number - 1) as usize;
+    if log_idx < crate::state::PRESSED_LOG_LEN {
+        nvm.pressed_log[log_idx] = crate::state::PressedEntry {
+            number,
+            recipient_fp: fp_bytes,
+        };
+    }
     Store::put(&nvm);
 
     let mac = session.mac_send(INS_PRESS_OFFER, &cert)?;

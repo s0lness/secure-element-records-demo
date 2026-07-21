@@ -155,6 +155,13 @@ def main():
         assert sw == SW_OK, f"refused ({sw})"
         print(f"pressed. {a.get_info()['counter']} remain in the master.")
 
+    elif step == "collection":
+        target = sys.argv[2] if len(sys.argv) > 2 else "a"
+        p = a if target == "a" else b
+        print(f">> browse the collection on Flex {target.upper()}; tap Back to leave")
+        _, sw = split_sw(p.dev.apdu(apdu_hex(0x02)))
+        print("closed." if sw == SW_OK else f"refused ({sw})")
+
     elif step == "verify":
         pressing = b.cmd(0x40, p1=0)
         album = b.cmd(0x40, p1=1)

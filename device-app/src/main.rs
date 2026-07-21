@@ -21,6 +21,7 @@ mod app_ui {
     pub mod menu;
 }
 mod handlers {
+    pub mod collection;
     pub mod cut;
     pub mod info;
     pub mod pair;
@@ -77,6 +78,7 @@ impl From<io::CommError> for AppSW {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Instruction {
     GetInfo,
+    Collection,
     Cut,
     PairCommit,
     PairRespond,
@@ -99,6 +101,7 @@ impl TryFrom<ApduHeader> for Instruction {
     fn try_from(value: ApduHeader) -> Result<Self, Self::Error> {
         match (value.ins, value.p1, value.p2) {
             (0x01, 0, 0) => Ok(Instruction::GetInfo),
+            (0x02, 0, 0) => Ok(Instruction::Collection),
             (0x10, 0, 0) => Ok(Instruction::Cut),
             (0x21, 0, 0) => Ok(Instruction::PairCommit),
             (0x22, 0, 0) => Ok(Instruction::PairRespond),
@@ -113,7 +116,7 @@ impl TryFrom<ApduHeader> for Instruction {
             (0x40, part @ (0 | 1), 0) => Ok(Instruction::GetBundle { part }),
             (0x41, 0, 0) => Ok(Instruction::Challenge),
             (0x50, 0, 0) => Ok(Instruction::ResetMaster),
-            (0x01 | 0x10 | 0x21..=0x25 | 0x30..=0x34 | 0x40 | 0x41 | 0x50, _, _) => {
+            (0x01 | 0x02 | 0x10 | 0x21..=0x25 | 0x30..=0x34 | 0x40 | 0x41 | 0x50, _, _) => {
                 Err(AppSW::WrongP1P2)
             }
             (_, _, _) => Err(AppSW::InsNotSupported),
@@ -154,6 +157,7 @@ extern "C" fn sample_main(_arg0: u32) {
         let ui_gated = matches!(
             ins,
             Instruction::Cut
+                | Instruction::Collection
                 | Instruction::PairSas
                 | Instruction::PressOffer
                 | Instruction::PressAccept
@@ -173,6 +177,7 @@ fn handle_apdu<'a>(
 ) -> Result<io::CommandResponse<'a>, AppSW> {
     match ins {
         Instruction::GetInfo => handlers::info::handler_get_info(command),
+        Instruction::Collection => handlers::collection::handler_collection(command),
         Instruction::Cut => handlers::cut::handler_cut(command),
         Instruction::ResetMaster => handlers::cut::handler_reset_master(command),
         Instruction::PairCommit => handlers::pair::handler_commit(command, session),

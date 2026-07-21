@@ -19,6 +19,14 @@ class SpeculosDevice:
         self.name = name
         self.api_port = api_port
         self.url = f"http://127.0.0.1:{api_port}"
+        try:
+            requests.get(f"{self.url}/events", timeout=1)
+            raise RuntimeError(
+                f"port {api_port} already serving a Speculos (emu-up.sh running?). "
+                "Stop it with scripts/emu-down.sh before running tests."
+            )
+        except requests.RequestException:
+            pass
         self.proc = subprocess.Popen(
             [
                 "speculos", "--model", "flex", "--display", "headless",

@@ -5,11 +5,14 @@ import pytest
 
 from presse_client import (
     Presse,
+    apdu_hex,
+    split_sw,
     run_pairing,
     confirm_sas_both,
     run_press,
     verify_chain,
     verify_possession,
+    INS_COLLECTION,
     INS_GET_ALBUM,
     INS_PRESS_REQUEST,
     INS_PRESS_OFFER,
@@ -51,6 +54,23 @@ def test_full_ceremony_and_offline_verification(ceremony):
     result = verify_chain(stored_album, pressing_cert, info_b["devpub"])
     assert result == {"title": TITLE, "number": 1, "edition": EDITION}
     verify_possession(receiver, pressing_cert)
+
+    # On-device collection screens: the master lists what it pressed and for
+    # whom; the receiver shows what it holds.
+    thread, res = master.dev.apdu_async_start(apdu_hex(INS_COLLECTION))
+    assert master.dev.wait_for_text("Still to press")
+    assert master.dev.wait_for_text("Pressed 1 of")
+    assert master.dev.wait_for_text("for device ")
+    master.tap_text("Back")
+    thread.join(timeout=30)
+    assert split_sw(res["data"])[1] == SW_OK
+
+    thread, res = receiver.dev.apdu_async_start(apdu_hex(INS_COLLECTION))
+    assert receiver.dev.wait_for_text("In my collection")
+    assert receiver.dev.wait_for_text(TITLE)
+    receiver.tap_text("Back")
+    thread.join(timeout=30)
+    assert split_sw(res["data"])[1] == SW_OK
 
 
 def test_counter_drains_to_sold_out(ceremony):
