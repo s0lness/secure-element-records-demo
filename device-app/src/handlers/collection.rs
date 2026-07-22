@@ -238,93 +238,120 @@ pub enum LibraryAction {
 /// this device holds, each row a decimated sleeve with its title and status,
 /// over a "Quitter" footer that really exits.
 ///
-/// It runs its own event loop, and that loop yields to the host: the library
-/// is what is on screen when a ceremony begins, so it must step aside for an
-/// incoming cut / pair / press instead of deadlocking against it.
+/// A drawn library, kept alive between APDUs. NBGL keeps raw pointers into the
+/// layout's strings and bitmaps, so the arena and string store must outlive the
+/// layout; struct fields drop in declaration order, so `layout` (whose `Drop`
+/// releases the NBGL handle) is listed first and released before the memory it
+/// points at.
+///
+/// Holding the drawn screen is what lets the landing loop serve a burst of
+/// data-plane APDUs (a bulk sleeve transfer is ~50 chunks) without repainting
+/// once per command: the library is rebuilt only when a command could have
+/// changed what it shows. See `library_main` in `main.rs`.
 #[cfg(any(target_os = "stax", target_os = "flex"))]
-pub fn show_library() -> Result<LibraryAction, AppSW> {
-    use crate::app_ui::library::{
-        run_event_loop, Exit, Layout, ScreenArena, TOKEN_INFO, TOKEN_MASTER, TOKEN_PRESSING,
-        TOKEN_QUIT,
-    };
+pub struct Library {
+    // Held only to keep the screen live and to release it on drop; never read.
+    _layout: crate::app_ui::library::Layout,
+    _arena: crate::app_ui::library::ScreenArena,
+    _strings: Vec<CString>,
+}
 
-    let nvm = Store::get()?;
-    let n = crate::state::ART_W;
-    let half = n / 2;
+#[cfg(any(target_os = "stax", target_os = "flex"))]
+impl Library {
+    /// Build the library from fresh NVM and draw it. The returned handle keeps
+    /// the screen (and its touch objects) live until dropped.
+    pub fn draw() -> Result<Library, AppSW> {
+        use crate::app_ui::library::{Layout, ScreenArena, TOKEN_MASTER, TOKEN_PRESSING, TOKEN_QUIT};
 
-    // Everything the layout points at must outlive the draw and the loop.
-    let mut arena = ScreenArena::new();
-    let mut strings: Vec<CString> = Vec::new();
-    let mut cstr = |s: String| -> *const core::ffi::c_char {
-        let owned = CString::new(s.replace('\0', " ")).unwrap_or_default();
-        strings.push(owned);
-        strings[strings.len() - 1].as_ptr()
-    };
+        let nvm = Store::get()?;
+        let n = crate::state::ART_W;
+        let half = n / 2;
 
-    let mut layout = Layout::new();
-    layout.header(cstr(String::from("Enclave Records")), core::ptr::null());
-
-    let mut has_any = false;
-
-    if nvm.has_master == 1 {
-        let title = title_str(&nvm.title, nvm.title_len)?;
-        let album_id = crate::crypto::sha256(&[&nvm.alb_pub])?;
-        let sleeve_hash = crate::certs::album_cert_sleeve_hash(&nvm.album_cert);
-        let thumb = crate::sleeve::to_display(&crate::sleeve::decimate(
-            &album_sleeve(&sleeve_hash, &album_id),
-            n,
-        ));
-        let icon = arena.icon(thumb, half as u16, half as u16, ledger_secure_sdk_sys::NBGL_BPP_1);
-        let status = if nvm.counter == 0 {
-            String::from("Sold out")
-        } else {
-            format!("{} of {} left to press", nvm.counter, nvm.edition)
+        // Everything the layout points at must outlive it: owned here, moved
+        // into the returned struct.
+        let mut arena = ScreenArena::new();
+        let mut strings: Vec<CString> = Vec::new();
+        let mut cstr = |s: String| -> *const core::ffi::c_char {
+            let owned = CString::new(s.replace('\0', " ")).unwrap_or_default();
+            strings.push(owned);
+            strings[strings.len() - 1].as_ptr()
         };
-        layout.touchable_bar(icon, cstr(String::from(title)), cstr(status), TOKEN_MASTER);
-        has_any = true;
+
+        let mut layout = Layout::new();
+        layout.header(cstr(String::from("Enclave Records")), core::ptr::null());
+
+        let mut has_any = false;
+
+        if nvm.has_master == 1 {
+            let title = title_str(&nvm.title, nvm.title_len)?;
+            let album_id = crate::crypto::sha256(&[&nvm.alb_pub])?;
+            let sleeve_hash = crate::certs::album_cert_sleeve_hash(&nvm.album_cert);
+            let thumb = crate::sleeve::to_display(&crate::sleeve::decimate(
+                &album_sleeve(&sleeve_hash, &album_id),
+                n,
+            ));
+            let icon = arena.icon(thumb, half as u16, half as u16, ledger_secure_sdk_sys::NBGL_BPP_1);
+            let status = if nvm.counter == 0 {
+                String::from("Sold out")
+            } else {
+                format!("{} of {} left to press", nvm.counter, nvm.edition)
+            };
+            layout.touchable_bar(icon, cstr(String::from(title)), cstr(status), TOKEN_MASTER);
+            has_any = true;
+        }
+
+        if nvm.has_pressing == 1 {
+            let album = parse_album_cert(&nvm.pressing_album_cert)?;
+            let title = title_str(&album.title, album.title_len)?;
+            let pressing = crate::certs::parse_pressing_cert(&nvm.pressing_cert, &album.albpub)?;
+            let thumb = crate::sleeve::to_display(&crate::sleeve::decimate(
+                &album_sleeve(&album.sleeve_hash, &pressing.album_id),
+                n,
+            ));
+            let icon = arena.icon(thumb, half as u16, half as u16, ledger_secure_sdk_sys::NBGL_BPP_1);
+            let status = format!("{} of {}, on this device", pressing.number, pressing.edition);
+            layout.touchable_bar(icon, cstr(String::from(title)), cstr(status), TOKEN_PRESSING);
+            has_any = true;
+        }
+
+        if !has_any {
+            layout.text(
+                cstr(String::from("No records yet")),
+                cstr(String::from("Cut a master or receive a pressing.")),
+            );
+        }
+
+        layout.footer(cstr(String::from("Quitter")), TOKEN_QUIT);
+        layout.draw();
+
+        // End the closure's borrow of `strings` before moving it into the
+        // struct; the pointers it handed the layout stay valid (they point into
+        // each CString's heap buffer, which the move does not touch).
+        drop(cstr);
+        Ok(Library {
+            _layout: layout,
+            _arena: arena,
+            _strings: strings,
+        })
     }
 
-    if nvm.has_pressing == 1 {
-        let album = parse_album_cert(&nvm.pressing_album_cert)?;
-        let title = title_str(&album.title, album.title_len)?;
-        let pressing = crate::certs::parse_pressing_cert(&nvm.pressing_cert, &album.albpub)?;
-        let thumb = crate::sleeve::to_display(&crate::sleeve::decimate(
-            &album_sleeve(&album.sleeve_hash, &pressing.album_id),
-            n,
-        ));
-        let icon = arena.icon(thumb, half as u16, half as u16, ledger_secure_sdk_sys::NBGL_BPP_1);
-        let status = format!("{} of {}, on this device", pressing.number, pressing.edition);
-        layout.touchable_bar(
-            icon,
-            cstr(String::from(title)),
-            cstr(status),
-            TOKEN_PRESSING,
-        );
-        has_any = true;
+    /// Yield to the host and the finger: block until an APDU is pending or the
+    /// user acts, without repainting. The drawn screen stays up throughout, so
+    /// this can be called repeatedly across served data-plane commands.
+    pub fn wait(&self) -> LibraryAction {
+        use crate::app_ui::library::{
+            run_event_loop, Exit, TOKEN_INFO, TOKEN_MASTER, TOKEN_PRESSING, TOKEN_QUIT,
+        };
+        match run_event_loop() {
+            Exit::Apdu => LibraryAction::Apdu,
+            Exit::Touched(TOKEN_QUIT) => LibraryAction::Quit,
+            Exit::Touched(TOKEN_INFO) => LibraryAction::Info,
+            Exit::Touched(TOKEN_PRESSING) => LibraryAction::OpenPressing,
+            Exit::Touched(TOKEN_MASTER) => LibraryAction::OpenMaster,
+            // Any other tap or a swipe on the list just redraws the library.
+            _ => LibraryAction::Redraw,
+        }
     }
-
-    if !has_any {
-        layout.text(
-            cstr(String::from("No records yet")),
-            cstr(String::from("Cut a master or receive a pressing.")),
-        );
-    }
-
-    layout.footer(cstr(String::from("Quitter")), TOKEN_QUIT);
-    layout.draw();
-
-    let action = match run_event_loop() {
-        Exit::Apdu => LibraryAction::Apdu,
-        Exit::Touched(TOKEN_QUIT) => LibraryAction::Quit,
-        Exit::Touched(TOKEN_INFO) => LibraryAction::Info,
-        Exit::Touched(TOKEN_PRESSING) => LibraryAction::OpenPressing,
-        Exit::Touched(TOKEN_MASTER) => LibraryAction::OpenMaster,
-        // Any other tap or a swipe on the list just redraws the library.
-        _ => LibraryAction::Redraw,
-    };
-    // Explicitly release the layout before the arena and strings it points at.
-    drop(layout);
-    Ok(action)
 }
 
 /// The (i) page: what the app is, and its version. Reuses the proven review

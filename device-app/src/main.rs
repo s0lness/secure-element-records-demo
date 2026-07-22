@@ -146,15 +146,44 @@ extern "C" fn sample_main(_arg0: u32) {
     legacy_home_main(comm, &mut session);
 }
 
-/// Serve exactly one APDU: decode, dispatch, reply. Shared by both landing
-/// loops so the wire behaviour is identical whatever is on screen.
-fn serve_one_command(comm: &mut io::Comm, session: &mut Session) {
+/// Whether serving `ins` warrants repainting the library afterwards.
+///
+/// Two things can make the drawn library stale: a command that changed the
+/// records it lists, or a command that drew its own screen over it and must
+/// have the library restored underneath. Both sets are exactly the UI-gated
+/// commands here (every state change on this device is behind a confirmation),
+/// so the rule is: repaint after a UI-gated command, never after a pure
+/// data-plane one. This is what keeps a bulk sleeve transfer (~50 SET_ART
+/// chunks) from repainting the whole screen once per chunk.
+fn warrants_library_redraw(ins: Instruction) -> bool {
+    matches!(
+        ins,
+        // State-changing, and each draws a confirmation over the library.
+        Instruction::Cut
+            | Instruction::PressOffer
+            | Instruction::PressAccept
+            | Instruction::ResetMaster
+            // UI-only: they cover the library, so it must be repainted under
+            // them, but they change nothing (SAS confirmation, the record card,
+            // the art-test probe).
+            | Instruction::PairSas
+            | Instruction::Collection
+            | Instruction::ArtTest { .. }
+    )
+}
+
+/// Serve exactly one APDU: decode, dispatch, reply. Returns whether the library
+/// should repaint afterwards (see [`warrants_library_redraw`]); the caller
+/// (`library_main`) uses it to repaint only when the screen could have changed.
+/// The non-touch landing loop ignores the return.
+fn serve_one_command(comm: &mut io::Comm, session: &mut Session) -> bool {
     let command = comm.next_command();
     let decoded = command.decode::<Instruction>();
     let Ok(ins) = decoded else {
         let _ = comm.send(&[], decoded.unwrap_err());
-        return;
+        return false;
     };
+    let redraw = warrants_library_redraw(ins);
     match handle_apdu(command, ins, session) {
         Ok(reply) => {
             let _ = reply.send(AppSW::Ok);
@@ -163,33 +192,60 @@ fn serve_one_command(comm: &mut io::Comm, session: &mut Session) {
             let _ = comm.send(&[], sw);
         }
     }
+    redraw
 }
 
 /// The library is the landing screen: it draws, handles taps (open a record,
 /// the info page, quit), and steps aside the moment an APDU is pending so the
-/// main loop can serve the command. After every command it is redrawn from
-/// fresh NVM, so the list always tells the device's current story.
+/// main loop can serve the command.
+///
+/// The drawn library is held across served commands and repainted only when a
+/// command could have changed what it shows (see [`warrants_library_redraw`]).
+/// A bulk sleeve transfer is dozens of data-plane APDUs; repainting per chunk
+/// flickers the screen and drags the transfer out on real hardware, so the
+/// library yields to each command but repaints at most once, after the burst.
+/// A cut or a press still repaints, so the new or updated record appears.
 #[cfg(any(target_os = "stax", target_os = "flex"))]
 fn library_main(comm: &mut io::Comm, session: &mut Session) {
-    use handlers::collection::{show_collection_screen, show_info_screen, show_library, LibraryAction};
+    use handlers::collection::{show_collection_screen, show_info_screen, Library, LibraryAction};
+
+    let mut library: Option<Library> = None;
     loop {
-        loop {
-            match show_library() {
-                Ok(LibraryAction::Apdu) => break,
-                Ok(LibraryAction::Quit) => ledger_device_sdk::exit_app(0),
-                Ok(LibraryAction::Info) => show_info_screen(),
-                // Each device holds at most one record in v1, so showing the
-                // whole collection is showing exactly the tapped one.
-                Ok(LibraryAction::OpenMaster) | Ok(LibraryAction::OpenPressing) => {
-                    let _ = show_collection_screen();
+        // (Re)draw the library only when we have no live screen: a fresh start,
+        // or after a command/interaction that invalidated the last one.
+        if library.is_none() {
+            match Library::draw() {
+                Ok(l) => library = Some(l),
+                // Fail closed: on a state error, don't spin on a broken screen;
+                // serve the host and try to redraw next time round.
+                Err(_) => {
+                    let _ = serve_one_command(comm, session);
+                    continue;
                 }
-                Ok(LibraryAction::Redraw) => {}
-                // Fail closed: on a state error, stop drawing and serve the
-                // host rather than spin on a broken screen.
-                Err(_) => break,
             }
         }
-        serve_one_command(comm, session);
+
+        match library.as_ref().unwrap().wait() {
+            LibraryAction::Apdu => {
+                // Serve the command with the library still on screen; drop it
+                // (forcing a redraw) only if the command could have changed it.
+                if serve_one_command(comm, session) {
+                    library = None;
+                }
+            }
+            LibraryAction::Quit => ledger_device_sdk::exit_app(0),
+            LibraryAction::Info => {
+                library = None; // the info page draws over the library
+                show_info_screen();
+            }
+            // Each device holds at most one record in v1, so showing the whole
+            // collection is showing exactly the tapped one.
+            LibraryAction::OpenMaster | LibraryAction::OpenPressing => {
+                library = None; // the record card draws over the library
+                let _ = show_collection_screen();
+            }
+            LibraryAction::Redraw => library = None,
+        }
     }
 }
 
