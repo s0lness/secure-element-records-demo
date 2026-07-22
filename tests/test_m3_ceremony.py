@@ -52,7 +52,12 @@ def test_full_ceremony_and_offline_verification(ceremony):
     pressing_cert = receiver.cmd(0x40, p1=0)
     stored_album = receiver.cmd(0x40, p1=1)
     result = verify_chain(stored_album, pressing_cert, info_b["devpub"])
-    assert result == {"title": TITLE, "number": 1, "edition": EDITION}
+    assert result["title"] == TITLE
+    assert result["number"] == 1
+    assert result["edition"] == EDITION
+    # This edition was cut with no sleeve uploaded, so the signed sleeve hash
+    # is the all-zero sentinel.
+    assert result["sleeve_hash"] == b"\x00" * 32
     verify_possession(receiver, pressing_cert)
 
     # On-device collection: an album card first (big art, edition line), the

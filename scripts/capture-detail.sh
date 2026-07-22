@@ -28,7 +28,6 @@ PID=$!
 sleep 2.5
 bash scripts/tap.sh 5001 "Cut the master" >/dev/null
 wait $PID
-curl -s http://127.0.0.1:5001/apdu -d '{"data":"b563000000"}' >/dev/null   # seal
 sleep 1
 
 # Open the record from the library, then swipe to the detail page.

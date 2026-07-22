@@ -35,10 +35,18 @@ SW_SOLD_OUT = "b104"
 
 PUBKEY_LEN = 65
 MAC_LEN = 32
-ALBUM_PAYLOAD_LEN = 4 + PUBKEY_LEN + 1 + 32 + 2
+SLEEVE_HASH_LEN = 32
+# magic(4) albpub(65) title_len(1) title(32) edition(2) sleeve_hash(32)
+ALBUM_PAYLOAD_LEN = 4 + PUBKEY_LEN + 1 + 32 + 2 + SLEEVE_HASH_LEN
 ALBUM_CERT_LEN = ALBUM_PAYLOAD_LEN + 1 + 72
 PRESSING_PAYLOAD_LEN = 4 + 32 + 2 + 2 + PUBKEY_LEN
 PRESSING_CERT_LEN = PRESSING_PAYLOAD_LEN + 1 + 72
+
+INS_SET_ART = 0x62
+INS_GET_ART = 0x64
+ART_CHUNK = 64
+ART_W = 160
+ART_LEN = ART_W * ART_W // 8  # 1bpp square sleeve, 3200 bytes
 
 
 def apdu_hex(ins: int, data: bytes = b"", p1: int = 0, p2: int = 0) -> str:
@@ -130,13 +138,15 @@ def run_pairing(master: Presse, receiver: Presse):
 def confirm_sas_both(master: Presse, receiver: Presse):
     """Fire PAIR_SAS on both devices, assert the words match on both screens,
     tap both. Returns the SAS bytes of each device."""
+    since_m = len(master.dev.events())
+    since_r = len(receiver.dev.events())
     tm, rm = master.dev.apdu_async_start(apdu_hex(INS_PAIR_SAS))
     tr, rr = receiver.dev.apdu_async_start(apdu_hex(INS_PAIR_SAS))
     assert master.dev.wait_for_text("Words match")
     assert receiver.dev.wait_for_text("Words match")
 
-    words_m = sas_words_on_screen(master.dev)
-    words_r = sas_words_on_screen(receiver.dev)
+    words_m = sas_words_on_screen(master.dev, since_m)
+    words_r = sas_words_on_screen(receiver.dev, since_r)
     assert words_m == words_r, f"SAS mismatch on screens: {words_m} vs {words_r}"
     assert len(words_m) == 4
 
@@ -151,10 +161,11 @@ def confirm_sas_both(master: Presse, receiver: Presse):
     return sas_m
 
 
-def sas_words_on_screen(dev) -> list:
+def sas_words_on_screen(dev, since: int = 0) -> list:
     """The SAS message is a 4-line text block; OCR may deliver it as one
-    event or per-line. Find the block adjacent to the instruction text."""
-    texts = dev.screen_texts()
+    event or per-line. Only look at events emitted after `since` (the event
+    count captured before firing PAIR_SAS), so stale screens can't leak in."""
+    texts = [e.get("text", "") for e in dev.events()[since:]]
     for t in texts:
         parts = [w for w in t.replace("\n", " ").split(" ") if w]
         if len(parts) == 4 and all(w.isalpha() and w.islower() for w in parts):
@@ -193,9 +204,10 @@ def parse_album_cert(cert: bytes):
     title_len = cert[69]
     title = cert[70 : 70 + title_len].decode()
     edition = struct.unpack_from("<H", cert, 102)[0]
+    sleeve_hash = cert[104 : 104 + SLEEVE_HASH_LEN]
     sig_len = cert[ALBUM_PAYLOAD_LEN]
     sig = cert[ALBUM_PAYLOAD_LEN + 1 : ALBUM_PAYLOAD_LEN + 1 + sig_len]
-    return albpub, title, edition, sig, cert[:ALBUM_PAYLOAD_LEN]
+    return albpub, title, edition, sleeve_hash, sig, cert[:ALBUM_PAYLOAD_LEN]
 
 
 def parse_pressing_cert(cert: bytes):
@@ -219,8 +231,9 @@ def ecdsa_verify(pubkey_uncompressed: bytes, payload: bytes, sig_der: bytes) -> 
 
 def verify_chain(album_cert: bytes, pressing_cert: bytes, holder_devpub: bytes) -> dict:
     """Full offline verification: album self-signature, pressing signature,
-    album_id linkage, device binding, number sanity."""
-    albpub, title, edition, alb_sig, alb_payload = parse_album_cert(album_cert)
+    album_id linkage, device binding, number sanity. The album signature now
+    also covers the sleeve hash, so a returned sleeve_hash is authenticated."""
+    albpub, title, edition, sleeve_hash, alb_sig, alb_payload = parse_album_cert(album_cert)
     assert ecdsa_verify(albpub, alb_payload, alb_sig), "album cert signature invalid"
 
     album_id, number, p_edition, recvpub, p_sig, p_payload = parse_pressing_cert(pressing_cert)
@@ -229,7 +242,29 @@ def verify_chain(album_cert: bytes, pressing_cert: bytes, holder_devpub: bytes) 
     assert p_edition == edition, "edition mismatch between certs"
     assert 1 <= number <= edition, "pressing number out of range"
     assert recvpub == holder_devpub, "pressing not bound to this device"
-    return {"title": title, "number": number, "edition": edition}
+    return {
+        "title": title,
+        "number": number,
+        "edition": edition,
+        "sleeve_hash": sleeve_hash,
+    }
+
+
+def verify_sleeve(album_cert: bytes, art_bytes: bytes) -> bool:
+    """The sleeve is genuine iff its bytes hash to the sleeve_hash the album
+    signature commits to. An all-zero sleeve_hash means the edition bound no
+    sleeve. Independent of the device: this is the check a third party runs."""
+    _, _, _, sleeve_hash, _, _ = parse_album_cert(album_cert)
+    if sleeve_hash == b"\x00" * SLEEVE_HASH_LEN:
+        return False
+    return hashlib.sha256(art_bytes).digest() == sleeve_hash
+
+
+def upload_art(presse: "Presse", art_bytes: bytes):
+    """Push a packed sleeve to the device over SET_ART, chunk by chunk."""
+    for off in range(0, len(art_bytes), ART_CHUNK):
+        payload = struct.pack("<H", off) + art_bytes[off : off + ART_CHUNK]
+        presse.cmd(INS_SET_ART, payload)
 
 
 def verify_possession(presse: Presse, pressing_cert: bytes):

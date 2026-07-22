@@ -39,10 +39,6 @@ pub struct PresseNvm {
     pub has_pressing: u8,
     pub pressing_cert: [u8; PRESSING_CERT_LEN],
     pub pressing_album_cert: [u8; ALBUM_CERT_LEN],
-
-    /// Cover art bound to the album this device knows (master or pressing).
-    pub has_art: u8,
-    pub art_hash: [u8; 32],
 }
 
 const EMPTY: PresseNvm = PresseNvm {
@@ -64,8 +60,6 @@ const EMPTY: PresseNvm = PresseNvm {
     has_pressing: 0,
     pressing_cert: [0; PRESSING_CERT_LEN],
     pressing_album_cert: [0; ALBUM_CERT_LEN],
-    has_art: 0,
-    art_hash: [0; 32],
 };
 
 #[link_section = ".nvm_data"]
@@ -101,6 +95,13 @@ impl Art {
             let first = (*data).get_ref()[0].get_ref().as_ptr();
             &*(first as *const [u8; ART_LEN])
         }
+    }
+
+    /// True when no art has been uploaded (the region is still all zeros).
+    /// A cut with a blank region binds the all-zero sleeve-hash sentinel, and
+    /// rendering shows generative art rather than a blank square.
+    pub fn is_blank() -> bool {
+        Self::get().iter().all(|&b| b == 0)
     }
 
     /// Burn one chunk at `offset` through the NVM write syscall (a plain

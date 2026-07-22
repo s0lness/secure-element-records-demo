@@ -1,11 +1,11 @@
-use crate::crypto;
-use crate::state::{Art, Store, ART_LEN};
+use crate::state::{Art, ART_LEN};
 use crate::AppSW;
 use ledger_device_sdk::io::{Command, CommandResponse};
 
 /// SET_ART: data = offset(u16 LE) || chunk. Cover art is public data (it
-/// travels with the album), so no UI gate; what makes it trustworthy is the
-/// hash stored in the album state at cut time.
+/// travels with the album), so no UI gate. What makes it trustworthy is the
+/// sleeve hash signed into the album certificate at cut time: the device
+/// renders the uploaded art only when its hash matches that certificate.
 pub fn handler_set_art(command: Command<'_>) -> Result<CommandResponse<'_>, AppSW> {
     let data = command.get_data();
     if data.len() < 3 {
@@ -14,24 +14,6 @@ pub fn handler_set_art(command: Command<'_>) -> Result<CommandResponse<'_>, AppS
     let offset = u16::from_le_bytes([data[0], data[1]]) as usize;
     Art::write_chunk(offset, &data[2..])?;
     let response = command.into_response();
-    Ok(response)
-}
-
-/// SEAL_ART: bind the uploaded art by storing its hash. From then on the
-/// device only renders art whose hash matches, so a tampered upload shows
-/// the fallback label rather than a lie. Sealed by the master after upload,
-/// and by a receiver once the art has been carried across at press time.
-pub fn handler_seal_art(command: Command<'_>) -> Result<CommandResponse<'_>, AppSW> {
-    let mut nvm = Store::get()?;
-    if nvm.has_master != 1 && nvm.has_pressing != 1 {
-        return Err(AppSW::NoMaster);
-    }
-    let hash = crypto::sha256(&[Art::get()])?;
-    nvm.art_hash = hash;
-    nvm.has_art = 1;
-    Store::put(&nvm);
-    let mut response = command.into_response();
-    response.append(&hash)?;
     Ok(response)
 }
 

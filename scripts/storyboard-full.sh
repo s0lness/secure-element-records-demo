@@ -57,13 +57,8 @@ sleep 2.5
 snap 5001 "03-a-cut-review"
 tap 5001 "Cut the master"
 wait $PID
-# Seal the sleeve now that A holds the master (hash binds to the cut edition).
-python3 - <<'EOF'
-import requests
-r = requests.post("http://127.0.0.1:5001/apdu", json={"data": "b563000000"}, timeout=10).json()
-assert r["data"].endswith("9000"), r
-print("A: sleeve sealed")
-EOF
+# No seal step: the cut already hashed the uploaded sleeve into the signed
+# album certificate, so A's master renders the RAM cover straight away.
 sleep 1
 snap 5001 "01-a-home"     # A's library, now holding the RAM record
 snap 5002 "02-b-home"     # B's library, still empty
@@ -98,7 +93,9 @@ wait $PID
 sleep 1
 
 # --- B's record card after receiving ------------------------------------
-# Carry the sleeve across to B and seal it, so B renders the real cover too.
+# Carry the sleeve across to B. No seal: B already holds the master's signed
+# album certificate (via the pressing), so it renders the cover as soon as the
+# uploaded bytes hash to the sleeve hash that certificate commits to.
 python3 - "$RAM" <<'EOF'
 import sys, struct, requests
 data = open(sys.argv[1], "rb").read()
@@ -108,9 +105,7 @@ for off in range(0, len(data), CHUNK):
     apdu = bytes([0xB5, 0x62, 0, 0, len(payload)]) + payload
     r = requests.post("http://127.0.0.1:5002/apdu", json={"data": apdu.hex()}, timeout=10).json()
     assert r["data"].endswith("9000"), r
-r = requests.post("http://127.0.0.1:5002/apdu", json={"data": "b563000000"}, timeout=10).json()
-assert r["data"].endswith("9000"), r
-print("B: sleeve carried across and sealed")
+print("B: sleeve carried across")
 EOF
 tap 5002 "Random Access"
 sleep 1.5

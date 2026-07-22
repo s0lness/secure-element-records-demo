@@ -16,19 +16,20 @@ fn title_str(title: &[u8], title_len: u8) -> Result<&str, AppSW> {
 }
 
 /// The sleeve this device should show for an album: the stored art when its
-/// hash still matches what was sealed, otherwise the generated label art.
+/// hash matches the one signed into the album certificate, otherwise the
+/// generated label art.
 ///
 /// A mismatch is not an error to report but a fact to render honestly: the
-/// device shows the album's own generated face rather than a bitmap it cannot
-/// vouch for.
-pub fn album_sleeve(album_id: &[u8; 32]) -> alloc::vec::Vec<u8> {
-    if let Ok(nvm) = Store::get() {
-        if nvm.has_art == 1 {
-            let art = crate::state::Art::get();
-            if let Ok(hash) = crate::crypto::sha256(&[art]) {
-                if crate::crypto::mac_eq(&hash, &nvm.art_hash) {
-                    return art.to_vec();
-                }
+/// device shows the album's own generated face rather than a bitmap the
+/// signed identity does not vouch for. An all-zero `sleeve_hash` means the
+/// edition was cut with no sleeve, so it too falls back.
+pub fn album_sleeve(sleeve_hash: &[u8; 32], album_id: &[u8; 32]) -> alloc::vec::Vec<u8> {
+    let unbound = *sleeve_hash == [0u8; 32];
+    if !unbound && !crate::state::Art::is_blank() {
+        let art = crate::state::Art::get();
+        if let Ok(hash) = crate::crypto::sha256(&[art]) {
+            if crate::crypto::mac_eq(&hash, sleeve_hash) {
+                return art.to_vec();
             }
         }
     }
@@ -77,14 +78,18 @@ pub fn show_collection_screen() -> Result<(), AppSW> {
     let full = crate::state::ART_W;
     let master_sleeve = if nvm.has_master == 1 {
         let album_id = crate::crypto::sha256(&[&nvm.alb_pub])?;
-        Some(crate::sleeve::to_display(&album_sleeve(&album_id)))
+        let sleeve_hash = crate::certs::album_cert_sleeve_hash(&nvm.album_cert);
+        Some(crate::sleeve::to_display(&album_sleeve(&sleeve_hash, &album_id)))
     } else {
         None
     };
     let pressing_sleeve = if nvm.has_pressing == 1 {
         let album = parse_album_cert(&nvm.pressing_album_cert)?;
         let pressing = crate::certs::parse_pressing_cert(&nvm.pressing_cert, &album.albpub)?;
-        Some(crate::sleeve::to_display(&album_sleeve(&pressing.album_id)))
+        Some(crate::sleeve::to_display(&album_sleeve(
+            &album.sleeve_hash,
+            &pressing.album_id,
+        )))
     } else {
         None
     };
@@ -238,7 +243,11 @@ pub fn show_library() -> Result<LibraryAction, AppSW> {
     if nvm.has_master == 1 {
         let title = title_str(&nvm.title, nvm.title_len)?;
         let album_id = crate::crypto::sha256(&[&nvm.alb_pub])?;
-        let thumb = crate::sleeve::to_display(&crate::sleeve::decimate(&album_sleeve(&album_id), n));
+        let sleeve_hash = crate::certs::album_cert_sleeve_hash(&nvm.album_cert);
+        let thumb = crate::sleeve::to_display(&crate::sleeve::decimate(
+            &album_sleeve(&sleeve_hash, &album_id),
+            n,
+        ));
         let icon = arena.icon(thumb, half as u16, half as u16, ledger_secure_sdk_sys::NBGL_BPP_1);
         let status = if nvm.counter == 0 {
             String::from("Sold out")
@@ -253,8 +262,10 @@ pub fn show_library() -> Result<LibraryAction, AppSW> {
         let album = parse_album_cert(&nvm.pressing_album_cert)?;
         let title = title_str(&album.title, album.title_len)?;
         let pressing = crate::certs::parse_pressing_cert(&nvm.pressing_cert, &album.albpub)?;
-        let thumb =
-            crate::sleeve::to_display(&crate::sleeve::decimate(&album_sleeve(&pressing.album_id), n));
+        let thumb = crate::sleeve::to_display(&crate::sleeve::decimate(
+            &album_sleeve(&album.sleeve_hash, &pressing.album_id),
+            n,
+        ));
         let icon = arena.icon(thumb, half as u16, half as u16, ledger_secure_sdk_sys::NBGL_BPP_1);
         let status = format!("{} of {}, on this device", pressing.number, pressing.edition);
         layout.touchable_bar(

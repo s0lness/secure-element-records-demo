@@ -6,9 +6,12 @@ use crate::crypto::{self, PUBKEY_LEN, SIG_MAX_LEN};
 use crate::AppSW;
 
 pub const TITLE_MAX: usize = 32;
+/// SHA-256 of the canonical sleeve bytes (as produced by scripts/sleeve.py).
+/// All-zero means "no sleeve bound"; the device then shows generative art.
+pub const SLEEVE_HASH_LEN: usize = 32;
 
 pub const ALBUM_MAGIC: &[u8; 4] = b"PRA1";
-pub const ALBUM_PAYLOAD_LEN: usize = 4 + PUBKEY_LEN + 1 + TITLE_MAX + 2;
+pub const ALBUM_PAYLOAD_LEN: usize = 4 + PUBKEY_LEN + 1 + TITLE_MAX + 2 + SLEEVE_HASH_LEN;
 pub const ALBUM_CERT_LEN: usize = ALBUM_PAYLOAD_LEN + 1 + SIG_MAX_LEN;
 
 pub const PRESSING_MAGIC: &[u8; 4] = b"PRP1";
@@ -17,12 +20,15 @@ pub const PRESSING_CERT_LEN: usize = PRESSING_PAYLOAD_LEN + 1 + SIG_MAX_LEN;
 
 /// AlbumCert layout:
 /// magic(4) | albpub(65) | title_len(1) | title(32, zero-padded) | edition(2 LE)
-/// | sig_len(1) | sig(72, zero-padded). Signature covers the payload prefix.
+/// | sleeve_hash(32) | sig_len(1) | sig(72, zero-padded). The signature covers
+/// the whole payload including the sleeve hash, so the sleeve is part of the
+/// signed identity of the edition, fixed at cut time.
 pub fn build_album_cert(
     alb_priv: &[u8; 32],
     albpub: &[u8; PUBKEY_LEN],
     title: &[u8],
     edition: u16,
+    sleeve_hash: &[u8; SLEEVE_HASH_LEN],
 ) -> Result<[u8; ALBUM_CERT_LEN], AppSW> {
     if title.is_empty() || title.len() > TITLE_MAX {
         return Err(AppSW::BadCert);
@@ -33,6 +39,7 @@ pub fn build_album_cert(
     cert[69] = title.len() as u8;
     cert[70..70 + title.len()].copy_from_slice(title);
     cert[102..104].copy_from_slice(&edition.to_le_bytes());
+    cert[104..104 + SLEEVE_HASH_LEN].copy_from_slice(sleeve_hash);
     let (sig, sig_len) = crypto::sign_payload(alb_priv, &cert[..ALBUM_PAYLOAD_LEN])?;
     cert[ALBUM_PAYLOAD_LEN] = sig_len;
     cert[ALBUM_PAYLOAD_LEN + 1..].copy_from_slice(&sig);
@@ -44,6 +51,16 @@ pub struct AlbumInfo {
     pub title: [u8; TITLE_MAX],
     pub title_len: u8,
     pub edition: u16,
+    pub sleeve_hash: [u8; SLEEVE_HASH_LEN],
+}
+
+/// The sleeve hash from a device's own AlbumCert, read straight from the
+/// signed bytes without re-verifying the signature (the NVM cert is trusted;
+/// a foreign cert reaches this only after `parse_album_cert`).
+pub fn album_cert_sleeve_hash(cert: &[u8; ALBUM_CERT_LEN]) -> [u8; SLEEVE_HASH_LEN] {
+    let mut h = [0u8; SLEEVE_HASH_LEN];
+    h.copy_from_slice(&cert[104..104 + SLEEVE_HASH_LEN]);
+    h
 }
 
 /// Parse and cryptographically verify an AlbumCert.
@@ -71,11 +88,14 @@ pub fn parse_album_cert(cert: &[u8]) -> Result<AlbumInfo, AppSW> {
     if edition == 0 {
         return Err(AppSW::BadCert);
     }
+    let mut sleeve_hash = [0u8; SLEEVE_HASH_LEN];
+    sleeve_hash.copy_from_slice(&cert[104..104 + SLEEVE_HASH_LEN]);
     Ok(AlbumInfo {
         albpub,
         title,
         title_len: title_len as u8,
         edition,
+        sleeve_hash,
     })
 }
 

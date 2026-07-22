@@ -1,6 +1,6 @@
-use crate::certs::{build_album_cert, TITLE_MAX};
+use crate::certs::{build_album_cert, SLEEVE_HASH_LEN, TITLE_MAX};
 use crate::crypto;
-use crate::state::Store;
+use crate::state::{Art, Store};
 use crate::AppSW;
 use alloc::format;
 use ledger_device_sdk::io::{Command, CommandResponse};
@@ -38,8 +38,17 @@ pub fn handler_cut(command: Command<'_>) -> Result<CommandResponse<'_>, AppSW> {
         return Err(AppSW::Deny);
     }
 
+    // The sleeve is bound at cut time: whatever art was uploaded before the
+    // cut becomes part of the signed identity. A blank region binds the
+    // all-zero sentinel, meaning "no sleeve".
+    let sleeve_hash: [u8; SLEEVE_HASH_LEN] = if Art::is_blank() {
+        [0u8; SLEEVE_HASH_LEN]
+    } else {
+        crypto::sha256(&[Art::get()])?
+    };
+
     let (alb_priv, alb_pub) = crypto::gen_keypair()?;
-    let cert = build_album_cert(&alb_priv, &alb_pub, &title_buf[..title_len], edition)?;
+    let cert = build_album_cert(&alb_priv, &alb_pub, &title_buf[..title_len], edition, &sleeve_hash)?;
 
     nvm.has_master = 1;
     nvm.alb_priv = alb_priv;
