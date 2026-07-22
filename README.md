@@ -9,6 +9,66 @@ live challenge-response, no server, no chain, no trust in the middleman.
 Runs on two Ledger Flex (or two emulated ones: everything below works with
 zero hardware).
 
+## How it works
+
+```mermaid
+sequenceDiagram
+    actor AH as Artist
+    participant A as Flex A · master
+    participant R as Laptop · untrusted relay
+    participant B as Flex B · receiver
+    actor BH as Collector
+
+    rect rgb(240,240,240)
+    Note over A: CUT
+    AH->>A: upload sleeve, cut album, edition of 5
+    A->>A: TRNG album key; seal sleeve hash + edition<br/>into a signed AlbumCert (never leaves the chip)
+    end
+
+    rect rgb(240,240,240)
+    Note over A,B: PAIR — commit-reveal ECDH through the relay
+    A->>R: commitment
+    R->>B: commitment
+    B->>R: ephemeral key
+    R->>A: ephemeral key
+    A->>R: reveal
+    R->>B: reveal
+    Note over A,B: both screens show the SAME 4 words
+    AH-->>BH: compare words out loud
+    AH->>A: tap "Words match"
+    BH->>B: tap "Words match"
+    Note over A,R,B: a lying relay makes the words differ → humans abort
+    end
+
+    rect rgb(240,240,240)
+    Note over A,B: PRESS
+    B->>R: request (device pubkey B)
+    R->>A: request
+    A->>A: counter 5 → 4 in silicon,<br/>sign PressingCert bound to pubkey B
+    A->>R: PressingCert
+    R->>B: PressingCert
+    BH->>B: tap "Receive"
+    end
+
+    rect rgb(240,240,240)
+    Note over B: VERIFY — offline, no network
+    BH->>B: challenge (random nonce)
+    B->>BH: signature by device key + cert chain
+    Note over BH: GENUINE: pressing 1 of 5, bound to this device
+    end
+```
+
+```mermaid
+flowchart LR
+    subgraph edition["signed edition (fixed at cut)"]
+        AC["AlbumCert<br/>album key · edition size · sleeve hash"]
+    end
+    AC -->|signs| PC["PressingCert<br/>number N of M · bound to device key"]
+    PC -->|challenge-response| DEV["the holding secure element<br/>proves it owns the bound key, live"]
+    AC -.->|album key lives only in the master's chip| PLATES["lose the master = plates destroyed"]
+    style edition fill:#f6f6f6,stroke:#bbb
+```
+
 ## The ceremony
 
 1. **Cut** - Flex A confirms "Cut master of *Nuits Roses*, edition of 5".
