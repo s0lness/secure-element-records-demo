@@ -158,16 +158,18 @@ def main():
         cert_mac, sw = gated(a, INS_PRESS_OFFER, req, "Press ", "Flex A")
         assert sw == SW_OK, f"refused ({sw})"
         b.cmd(INS_PRESS_LOAD_ALBUM, album_msg)
-        _, sw = gated(b, INS_PRESS_ACCEPT, cert_mac, "Receive ", "Flex B")
-        assert sw == SW_OK, f"refused ({sw})"
-        print(f"pressed. {a.get_info()['counter']} remain in the master.")
-        # Carry the sleeve along so B renders the real cover the instant the
-        # pressing lands, never the generative fallback. Skipped silently for a
-        # sleeveless edition.
+        # Carry the sleeve along BEFORE accepting. B repaints its library only
+        # when the pressing lands, so streaming the art first (SET_ART never
+        # repaints) makes that single repaint render the real cover the instant
+        # the pressing lands, never the generative fallback. Skipped silently
+        # for a sleeveless edition.
         if a.get_info()["has_master"]:
             sha = carry_sleeve(a, b)
             if sha:
                 print(f"sleeve carried A->B (sha {sha[:12]}…)")
+        _, sw = gated(b, INS_PRESS_ACCEPT, cert_mac, "Receive ", "Flex B")
+        assert sw == SW_OK, f"refused ({sw})"
+        print(f"pressed. {a.get_info()['counter']} remain in the master.")
 
     elif step == "art":
         # Upload the cover to A BEFORE the cut. There is no seal step: the cut

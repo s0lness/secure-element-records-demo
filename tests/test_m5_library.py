@@ -18,6 +18,9 @@ from presse_client import (
     parse_album_cert,
     verify_sleeve,
     upload_art,
+    run_pairing,
+    confirm_sas_both,
+    run_press,
     ART_LEN,
     INS_COLLECTION,
     SLEEVE_HASH_LEN,
@@ -76,6 +79,56 @@ def test_record_title_comes_from_the_certificate(device):
     p.tap_text(TITLE)
     assert device.wait_for_text(TITLE), device.screen_texts()
     p.tap_text("Back")
+
+
+# --- the library redraws only when it could have changed ----------------
+
+
+def test_bulk_art_upload_leaves_the_library_intact(device):
+    """A full sleeve is ~50 SET_ART chunks. Streamed while the library is the
+    screen on display, none of them disturbs the record it lists nor stalls the
+    device: the library yields to each chunk but does not repaint per chunk (the
+    on-hardware flicker/slowness this gating removes). Correctness is what we can
+    assert here; the absence of a repaint is confirmed by screenshot on device."""
+    p = Presse(device)
+    p.cut(TITLE, EDITION)
+    assert device.wait_for_text(TITLE), device.screen_texts()
+
+    upload_art(p, a_sleeve())  # the burst, served with the library on screen
+
+    # The library still lists the record, unchanged, and the device is still
+    # serving commands: the burst neither corrupted the screen nor wedged it.
+    assert device.wait_for_text(TITLE), device.screen_texts()
+    assert device.wait_for_text("left to press"), device.screen_texts()
+    assert p.get_info()["title"] == TITLE
+
+
+def test_press_repaints_the_receiver_with_the_real_sleeve(pair):
+    """The receiver repaints its library only when the pressing lands. Carrying
+    the sleeve across before PRESS_ACCEPT means that single repaint shows the
+    real, hash-verified cover, never the generative placeholder: the record card
+    reports the sleeve "Verified"."""
+    a, b = pair
+    master, receiver = Presse(a), Presse(b)
+
+    art = a_sleeve()
+    upload_art(master, art)  # sealed into the cut's signed sleeve hash
+    master.cut(TITLE, EDITION)
+    run_pairing(master, receiver)
+    confirm_sas_both(master, receiver)
+    run_press(master, receiver, carry_from=master)
+
+    # B's library repainted on accept and now lists the pressing.
+    assert b.wait_for_text(TITLE), b.screen_texts()
+
+    thread, res = b.apdu_async_start(apdu_hex(INS_COLLECTION))
+    assert b.wait_for_text("Pressing 1 of"), b.screen_texts()
+    b.finger(430, 550)  # swipe to the provenance page
+    # The carried bytes hash to the sealed sleeve hash, so B vouches for them.
+    assert b.wait_for_text("Verified"), b.screen_texts()
+    receiver.tap_text("Back")
+    thread.join(timeout=30)
+    assert split_sw(res["data"])[1] == SW_OK
 
 
 # --- the sleeve hash inside the album certificate -----------------------

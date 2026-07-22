@@ -21,6 +21,7 @@ from presse_client import (  # noqa: E402
     apdu_hex,
     split_sw,
     carry_sleeve,
+    upload_art,
     verify_chain,
     verify_possession,
     INS_PAIR_COMMIT,
@@ -109,12 +110,18 @@ def main():
     if info_a["has_master"]:
         print(f'   master already cut: "{info_a["title"]}", {info_a["counter"]} pressings left')
     else:
+        # Upload the cover to A before the cut, so its hash is sealed into the
+        # signed album cert and the sleeve becomes part of the edition.
+        cover_path = os.path.join(os.path.dirname(__file__), "..", "docs", "art", "ram-cover.bin")
+        if os.path.exists(cover_path):
+            upload_art(a, open(cover_path, "rb").read())
+            print(f"   cover uploaded to Flex A ({os.path.basename(cover_path)})")
         print(f'   cutting master of "{args.title}", edition of {args.edition}')
         data = struct.pack("<H", args.edition) + args.title.encode()
         print("   >> confirm on Flex A")
         body, sw = split_sw(a.dev.apdu(apdu_hex(INS_CUT, data)))
         assert sw == SW_OK, f"cut refused: {sw}"
-        print("   master cut. The edition size is now physics.")
+        print("   master cut. The edition size (and cover) are now physics.")
 
     print("== presse: pairing (this relay is untrusted) ==")
     commitment = a.cmd(INS_PAIR_COMMIT)
@@ -135,17 +142,20 @@ def main():
     cert_mac, sw = split_sw(a.dev.apdu(apdu_hex(INS_PRESS_OFFER, req)))
     assert sw == SW_OK, f"press refused: {sw}"
     b.cmd(INS_PRESS_LOAD_ALBUM, album_msg)
-    print("   >> confirm the receive on Flex B")
-    _, sw = split_sw(b.dev.apdu(apdu_hex(INS_PRESS_ACCEPT, cert_mac)))
-    assert sw == SW_OK, f"receive refused: {sw}"
 
-    # Carry the sleeve A->B so B shows the real cover the instant the pressing
-    # lands, never the generative fallback. Public bytes; B validates them
-    # against the signed cert hash. Skipped for a sleeveless edition.
+    # Carry the sleeve A->B BEFORE the receive. B repaints its library only when
+    # the pressing lands, so streaming the art first (SET_ART never repaints)
+    # makes that single repaint show the real cover the instant the pressing
+    # lands, never flashing the generative fallback. Public bytes; B validates
+    # them against the signed cert hash. Skipped for a sleeveless edition.
     if a.get_info()["has_master"]:
         sha = carry_sleeve(a, b)
         if sha:
             print(f"   sleeve carried A->B (sha {sha[:12]}…)")
+
+    print("   >> confirm the receive on Flex B")
+    _, sw = split_sw(b.dev.apdu(apdu_hex(INS_PRESS_ACCEPT, cert_mac)))
+    assert sw == SW_OK, f"receive refused: {sw}"
 
     info_a = a.get_info()
     print(f"   pressed. {info_a['counter']} of {info_a['edition']} remain in the master.")

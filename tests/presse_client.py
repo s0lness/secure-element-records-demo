@@ -183,13 +183,21 @@ def sas_words_on_screen(dev, since: int = 0) -> list:
     return words[-4:] if len(words) >= 4 else words
 
 
-def run_press(master: Presse, receiver: Presse) -> bytes:
-    """One full press onto the receiver. Returns the PressingCert."""
+def run_press(master: Presse, receiver: Presse, carry_from: "Presse | None" = None) -> bytes:
+    """One full press onto the receiver. Returns the PressingCert.
+
+    When `carry_from` is given, its sleeve is streamed to the receiver AFTER the
+    album cert is loaded but BEFORE the pressing is accepted. The receiver only
+    repaints its library when the pressing lands (PRESS_ACCEPT), so carrying the
+    art first is what makes that single repaint show the real cover instead of
+    the generative placeholder. SET_ART itself never repaints."""
     album_msg = master.cmd(INS_GET_ALBUM)
     req = receiver.cmd(INS_PRESS_REQUEST)
     cert_mac, sw = master.cmd_gated(INS_PRESS_OFFER, req, "Press this copy", "Press ")
     assert sw == SW_OK, f"press offer failed: {sw}"
     receiver.cmd(INS_PRESS_LOAD_ALBUM, album_msg)
+    if carry_from is not None:
+        carry_sleeve(carry_from, receiver)
     _, sw = receiver.cmd_gated(INS_PRESS_ACCEPT, cert_mac, "Receive it", "Receive ")
     assert sw == SW_OK, f"press accept failed: {sw}"
     return cert_mac[:PRESSING_CERT_LEN]
