@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Stitch the captured device screens into docs/demo.gif.
+"""Stitch the captured device screens into docs/demo.gif and docs/demo.mp4.
 
 Each beat is composited as [Flex A screen] | [plain-language caption] |
-[Flex B screen] on warm paper, mirroring the two-screen cockpit. Key beats
-(identical 4 words, the cover landing on B, the GENUINE verdict) are held
-longer by duplicating frames. Run by scripts/record-demo.sh after a capture;
-reads docs/screens/frames/raw/*.png, writes docs/demo.gif."""
+[Flex B screen] on warm paper, mirroring the two-screen cockpit. Every beat
+is held for a comfortable, readable wall-clock duration (see BEATS); the
+relay-wire dots march each frame so nothing looks frozen. The GIF autoplays
+inline on GitHub; the mp4 (same frames, same pacing) is pausable/scrubbable.
+Run by scripts/record-demo.sh after a capture; reads
+docs/screens/frames/raw/*.png."""
 
 import os
 from PIL import Image, ImageDraw, ImageFont
@@ -13,6 +15,7 @@ from PIL import Image, ImageDraw, ImageFont
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RAW = os.path.join(ROOT, "docs", "screens", "frames", "raw")
 OUT = os.path.join(ROOT, "docs", "demo.gif")
+MP4 = os.path.join(ROOT, "docs", "demo.mp4")
 
 # --- canvas / palette ----------------------------------------------------
 W, H = 940, 430
@@ -177,51 +180,80 @@ def frame(a_png, b_png, kicker, main, sub, badge_text=None, phase=0):
 
 
 # --- storyboard ----------------------------------------------------------
-# (a_png, b_png, kicker, main, sub, badge, hold_frames)
+# (a_png, b_png, kicker, main, sub, badge, seconds)
+# Durations are wall-clock holds: long enough to read both screens and the
+# caption without rushing (~28 s total loop).
 BEATS = [
     ("a-empty", "b-empty", "TWO LEDGER FLEX",
      "A master and a receiver",
-     "the laptop between them is untrusted", None, 6),
+     "the laptop between them is untrusted", None, 3.0),
     ("a-cut", "b-empty", "STEP 1  ·  CUT",
      "Cut the master",
-     "edition of 5, sealed in silicon forever", None, 9),
+     "edition of 5, sealed in silicon forever", None, 4.0),
     ("a-sas", "b-sas", "STEP 2  ·  PAIR",
      "Both screens show the SAME 4 words",
-     "the humans compare them; a lying relay makes them differ", None, 13),
+     "the humans compare them; a lying relay makes them differ", None, 5.0),
     ("a-press", "b-receive", "STEP 3  ·  PRESS",
      "Press 1 of 5",
-     "the counter drops in silicon, bound to this receiver's chip", None, 9),
+     "the counter drops in silicon, bound to this receiver's chip", None, 4.0),
     ("a-card", "b-card", "STEP 3  ·  PRESS",
      "The cover travels with the pressing",
-     "numbered 1 of 5, bound to this device", None, 11),
-    ("a-card", "b-prov", "STEP 4  ·  VERIFY",
+     "numbered 1 of 5, bound to this device", None, 3.0),
+    ("a-card", "b-card", "STEP 4  ·  VERIFY",
      "Verified offline",
-     "pressing 1 of 5  ·  no server, no chain", "GENUINE", 15),
+     "possession proven live  ·  no server, no chain", "GENUINE", 5.0),
+    ("a-card", "b-prov", "STEP 4  ·  VERIFY",
+     "Its provenance, on the device",
+     "album fingerprint  ·  sleeve verified  ·  edition sealed", None, 4.0),
 ]
 
 
-def main():
-    frames, durations = [], []
-    base = 180  # ms per frame -> ~5.5 fps
+BASE_MS = 160          # one frame every 160 ms -> 6.25 fps (smooth wire)
+FPS = 1000 / BASE_MS
+
+
+def build_frames():
+    """Compose the whole storyboard once as RGB frames, holding each beat for
+    its wall-clock seconds and advancing the relay-wire phase every frame."""
+    frames = []
     phase = 0
-    for a, b, k, m, s, bd, hold in BEATS:
-        for _ in range(hold):
+    for a, b, k, m, s, bd, secs in BEATS:
+        for _ in range(max(1, round(secs * 1000 / BASE_MS))):
             frames.append(frame(a, b, k, m, s, bd, phase=phase))
-            durations.append(base)
             phase += 1
+    return frames
 
-    # quantize to a shared adaptive palette for crisp, small output
+
+def write_gif(frames):
     pal_src = frames[-1].quantize(colors=128, method=Image.MEDIANCUT)
-    qframes = [fr.quantize(colors=128, palette=pal_src, dither=Image.NONE)
-               for fr in frames]
-
-    qframes[0].save(
-        OUT, save_all=True, append_images=qframes[1:], loop=0,
-        duration=durations, optimize=True, disposal=1,
-    )
-    size = os.path.getsize(OUT)
+    q = [f.quantize(colors=128, palette=pal_src, dither=Image.NONE) for f in frames]
+    q[0].save(OUT, save_all=True, append_images=q[1:], loop=0,
+              duration=[BASE_MS] * len(q), optimize=True, disposal=1)
+    n, size = len(q), os.path.getsize(OUT)
     print(f"wrote {OUT}")
-    print(f"  {len(qframes)} frames, {W}x{H}, {size/1e6:.2f} MB")
+    print(f"  {n} frames, {W}x{H}, {size/1e6:.2f} MB, {n*BASE_MS/1000:.1f}s loop")
+
+
+def write_mp4(frames):
+    import imageio.v2 as imageio
+    import numpy as np
+    # yuv420p + even dims for universal playback; CRF 23 keeps it small.
+    w = imageio.get_writer(
+        MP4, fps=FPS, codec="libx264", macro_block_size=1,
+        ffmpeg_params=["-crf", "23", "-pix_fmt", "yuv420p"],
+    )
+    for f in frames:
+        w.append_data(np.asarray(f.convert("RGB")))
+    w.close()
+    n, size = len(frames), os.path.getsize(MP4)
+    print(f"wrote {MP4}")
+    print(f"  {n} frames, {W}x{H}, {size/1e6:.2f} MB, {n/FPS:.1f}s")
+
+
+def main():
+    frames = build_frames()
+    write_gif(frames)
+    write_mp4(frames)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,13 @@
 ![Enclave Records demo](docs/demo.gif)
 
 *An artist cuts a master, two Ledger Flex pair by comparing four words, a numbered copy is pressed onto the receiver, and anyone verifies it offline.*
+▶ [Watch the video (pausable)](docs/demo.mp4)
+
+<!-- Maintainer: to get an inline HTML5 player with play/pause/scrub controls,
+     open this README in the github.com editor and DRAG docs/demo.mp4 into it;
+     GitHub uploads it and rewrites the link as an embedded player. A committed
+     mp4 referenced by path (as above) renders only as a download link. The GIF
+     stays for zero-click inline autoplay. -->
 
 Finite editions of digital works, enforced by silicon. An artist device "cuts
 a master" of an album (edition size and press counter captive in a secure
