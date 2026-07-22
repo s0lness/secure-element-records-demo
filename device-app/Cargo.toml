@@ -28,7 +28,7 @@ debug = ["ledger_device_sdk/debug"]
 curve = ["secp256k1"]
 flags = "0"
 path = ["44'/1'"]
-name = "Presse"
+name = "Enclave Records"
 nanosplus = { icon = "icons/crab_14x14.gif" }
 nanox = { icon = "icons/crab_14x14.gif" }
 stax = { icon = "icons/vinyl_32x32.gif" }

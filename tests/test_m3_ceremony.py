@@ -79,7 +79,11 @@ def test_full_ceremony_and_offline_verification(ceremony):
     assert receiver.dev.wait_for_text("Pressing 1 of")
     assert receiver.dev.wait_for_text(TITLE)
     receiver.dev.finger(*NEXT_PAGE)
-    assert receiver.dev.wait_for_text("In my collection")
+    # Provenance page: album fingerprint, pressing number, sleeve status, seal.
+    assert receiver.dev.wait_for_text("Album fingerprint")
+    assert receiver.dev.wait_for_text("Sealed")
+    # No art was uploaded in this ceremony, so the sleeve is honestly unloaded.
+    assert receiver.dev.wait_for_text("Not loaded")
     receiver.tap_text("Back")
     thread.join(timeout=30)
     assert split_sw(res["data"])[1] == SW_OK

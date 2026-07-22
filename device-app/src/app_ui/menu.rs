@@ -1,6 +1,9 @@
-use ledger_device_sdk::include_gif;
-use ledger_device_sdk::nbgl::{NbglChoice, NbglGlyph};
+use ledger_device_sdk::nbgl::NbglChoice;
 
+#[cfg(not(any(target_os = "stax", target_os = "flex")))]
+use ledger_device_sdk::include_gif;
+#[cfg(not(any(target_os = "stax", target_os = "flex")))]
+use ledger_device_sdk::nbgl::NbglGlyph;
 #[cfg(not(any(target_os = "stax", target_os = "flex")))]
 use alloc::format;
 #[cfg(not(any(target_os = "stax", target_os = "flex")))]
@@ -12,10 +15,10 @@ use ledger_device_sdk::nbgl::NbglHomeAndSettings;
 #[cfg(not(any(target_os = "stax", target_os = "flex")))]
 use crate::state::Store;
 
+// The generic vinyl glyph only survives on the button-based home (Nano/Apex).
+// Flex/Stax open on the library and confirmations carry no decorative art.
 #[cfg(target_os = "apex_p")]
 pub const RECORD: NbglGlyph = NbglGlyph::from_include(include_gif!("glyphs/crab_48x48.png", NBGL));
-#[cfg(any(target_os = "stax", target_os = "flex"))]
-pub const RECORD: NbglGlyph = NbglGlyph::from_include(include_gif!("glyphs/vinyl_64x64.gif", NBGL));
 #[cfg(any(target_os = "nanosplus", target_os = "nanox"))]
 pub const RECORD: NbglGlyph =
     NbglGlyph::from_include(include_gif!("glyphs/home_nano_nbgl.png", NBGL));
@@ -63,7 +66,7 @@ pub fn ui_menu_main(_: &mut Comm) -> NbglHomeAndSettings {
         .glyph(&RECORD)
         .tagline(&tagline())
         .action("My records", None, on_my_records)
-        .infos("Presse", env!("CARGO_PKG_VERSION"), env!("CARGO_PKG_AUTHORS"))
+        .infos("Enclave Records", env!("CARGO_PKG_VERSION"), env!("CARGO_PKG_AUTHORS"))
 }
 
 /// The home drawn from the NBGL callback must outlive the draw call (NBGL
@@ -83,7 +86,7 @@ fn on_my_records() {
             .glyph(&RECORD)
             .tagline(&tagline())
             .action("My records", None, on_my_records)
-            .infos("Presse", env!("CARGO_PKG_VERSION"), env!("CARGO_PKG_AUTHORS")),
+            .infos("Enclave Records", env!("CARGO_PKG_VERSION"), env!("CARGO_PKG_AUTHORS")),
     );
     let ptr = alloc::boxed::Box::into_raw(home);
     unsafe {
@@ -97,7 +100,9 @@ fn on_my_records() {
     }
 }
 
-/// The confirmation page used by every ceremony, vinyl front and center.
+/// The confirmation page used by every ceremony. No decorative glyph: the
+/// message text carries the whole meaning, and album art belongs only on the
+/// record card and the library row, never on a yes/no confirmation.
 pub fn ceremony_choice() -> NbglChoice<'static> {
-    NbglChoice::new().glyph(&RECORD)
+    NbglChoice::new()
 }

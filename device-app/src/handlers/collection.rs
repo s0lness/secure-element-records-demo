@@ -166,11 +166,37 @@ pub fn show_collection_screen() -> Result<(), AppSW> {
                 &glyph,
             ));
         }
-        names_h.push(String::from("In my collection"));
-        values_h.push(format!(
-            "{}, {} of {}",
-            title, pressing.number, pressing.edition
-        ));
+        // Provenance page: only facts the certificate actually authenticates.
+        // The album fingerprint identifies the artist's master and edition;
+        // the presser's device is deliberately absent, since a receiver has no
+        // authenticated way to learn it without a protocol change.
+        let album_hash = crate::crypto::sha256(&[&album.albpub])?;
+        let mut album_fp = [0u8; 4];
+        album_fp.copy_from_slice(&album_hash[..4]);
+        names_h.push(String::from("Album fingerprint"));
+        values_h.push(fingerprint_str(&album_fp));
+
+        names_h.push(String::from("Pressing"));
+        values_h.push(format!("{} of {}", pressing.number, pressing.edition));
+
+        // Honest about the art: verified only when the stored bytes hash to
+        // the sleeve the certificate signed; otherwise the record is showing
+        // generative fallback art, so say so.
+        let sleeve_verified = album.sleeve_hash != [0u8; 32]
+            && !crate::state::Art::is_blank()
+            && crate::crypto::sha256(&[crate::state::Art::get()])
+                .map(|h| crate::crypto::mac_eq(&h, &album.sleeve_hash))
+                .unwrap_or(false);
+        names_h.push(String::from("Sleeve"));
+        values_h.push(String::from(if sleeve_verified {
+            "Verified"
+        } else {
+            "Not loaded"
+        }));
+
+        names_h.push(String::from("Edition"));
+        values_h.push(String::from("Sealed"));
+
         review = review.add_content(fields_page(&names_h, &values_h));
     }
 
@@ -305,7 +331,7 @@ pub fn show_library() -> Result<LibraryAction, AppSW> {
 /// widget rather than another raw layout.
 #[cfg(any(target_os = "stax", target_os = "flex"))]
 pub fn show_info_screen() {
-    let names = [String::from("Presse"), String::from("Editions")];
+    let names = [String::from("Enclave Records"), String::from("Editions")];
     let values = [
         String::from(env!("CARGO_PKG_VERSION")),
         String::from("Finite, pressed in silicon."),
