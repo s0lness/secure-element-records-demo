@@ -1,4 +1,4 @@
-# secure element records demo
+# Enclave Records
 
 ![Enclave Records demo](docs/demo.gif)
 
@@ -19,6 +19,26 @@ live challenge-response, no server, no chain, no trust in the middleman.
 
 Runs on two Ledger Flex (or two emulated ones: everything below works with
 zero hardware).
+
+## Why this is cool
+
+Streaming turned every song, book and film into a rental. This makes a digital
+work ownable again, as a numbered object with real scarcity:
+
+- **The scarcity is physical, not promised.** The edition size lives inside a
+  tamper-resistant secure element. Once an artist cuts a master of 5, even they
+  cannot press a sixth. No server enforces it; no one can quietly mint more.
+- **You hold one specific copy.** "4 of 5", bound to your device's key, provable
+  on the spot by a tap. The files can leak everywhere; being one of the five
+  cannot be copied.
+- **No blockchain, no account, no server.** A copy verifies offline, forever,
+  against nothing but a signature. The object outlives the company that made it:
+  nothing to shut down, nothing that phones home.
+- **It behaves like an object.** Hand it over and it is transferred, like a
+  record or a Game Boy cartridge. The cover art travels with the pressing; the
+  lineage belongs to the object, not to a ledger.
+
+A working prototype of that idea, on hardware you can buy today.
 
 ## How it works
 
@@ -116,12 +136,24 @@ python3 relay/demo_steps.py cut   # then: pair, press, verify
 Real hardware: [docs/m5-hardware.md](docs/m5-hardware.md) (sideloading via
 `ledgerctl`, USB-to-WSL passthrough, same ceremony on two physical Flex).
 
-## Status & honest caveats
+## Limitations
 
-- Protocol, app, adversarial suite and emulated demo: working (M1-M4 green).
-- Live two-device hardware demo: pending (M5, tooling ready).
-- v1 has **no remote attestation**: the "edition can never exceed N" claim is
-  enforced against everyone except a malicious operator running a modified
-  app; the fallback is fraud-evidence (two certs with the same number are
-  mutually incriminating). Closing that gap needs BOLOS endorsement, tracked
-  in the docs.
+- **No remote attestation (v1).** The "edition can never exceed N" claim is
+  enforced against everyone except a malicious operator running a *modified*
+  app: nothing yet proves to a third party that the album key is captive in
+  unmodified code. The fallback is fraud-evidence (two certs with the same
+  number are mutually incriminating, and a transparency log makes that instant).
+  Closing the gap needs BOLOS endorsement, tracked in the docs.
+- **The trust root is the silicon.** Verification trusts Ledger's secure
+  element and our published app hash. Extracting a key from the secure element
+  would break the guarantees: that is the explicit bet.
+- **The cover is public, not secret.** The sleeve travels to the receiver
+  through the untrusted relay; integrity comes from the signed hash, not
+  secrecy. Fine for artwork, not a model for private payloads.
+- **Losing the master ends the edition.** The album key lives only in the
+  master's chip and is never backed up, so a lost or wiped master can never
+  press again. Deliberate ("the plates are destroyed"), but it is a real
+  constraint.
+- **One pressing per receiver, sideload-only (v1).** A device holds a single
+  pressing, and the app is installed by sideloading, not from Ledger's catalog.
+  This is a lab prototype, not a shippable product.
