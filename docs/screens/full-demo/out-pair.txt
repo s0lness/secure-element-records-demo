@@ -1,4 +1,4 @@
-Flex A shows: sleigh / firefly / temple / melon
-Flex B shows: sleigh / firefly / temple / melon
+Flex A shows: syrup / clover / peacock / bronze
+Flex B shows: syrup / clover / peacock / bronze
 >> compare, then tap 'Words match' on BOTH pages
 channel authenticated.
