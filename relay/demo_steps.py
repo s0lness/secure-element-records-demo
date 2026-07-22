@@ -133,12 +133,14 @@ def main():
         eb = b.cmd(INS_PAIR_RESPOND, commitment)
         ea = a.cmd(INS_PAIR_REVEAL, eb)
         b.cmd(INS_PAIR_FINISH, ea)
+        since_a = len(a.dev.events())
+        since_b = len(b.dev.events())
         ta, ra = a.dev.apdu_async_start(apdu_hex(INS_PAIR_SAS))
         tb, rb = b.dev.apdu_async_start(apdu_hex(INS_PAIR_SAS))
         assert a.dev.wait_for_text("Words match", timeout=10)
         assert b.dev.wait_for_text("Words match", timeout=10)
-        print(f"Flex A shows: {' / '.join(sas_words_on_screen(a.dev))}")
-        print(f"Flex B shows: {' / '.join(sas_words_on_screen(b.dev))}")
+        print(f"Flex A shows: {' / '.join(sas_words_on_screen(a.dev, since_a))}")
+        print(f"Flex B shows: {' / '.join(sas_words_on_screen(b.dev, since_b))}")
         print(">> compare, then tap 'Words match' on BOTH pages")
         ta.join(timeout=600)
         tb.join(timeout=600)
@@ -154,6 +156,35 @@ def main():
         _, sw = gated(b, INS_PRESS_ACCEPT, cert_mac, "Receive ", "Flex B")
         assert sw == SW_OK, f"refused ({sw})"
         print(f"pressed. {a.get_info()['counter']} remain in the master.")
+
+    elif step == "art":
+        # Upload the cover BEFORE the cut. There is no seal step any more: the
+        # cut hashes whatever is in the art region into the signed album cert,
+        # so A must receive the sleeve while still blank and pre-cut. B only
+        # needs it re-uploaded once it holds a pressing (to render the cover it
+        # already has a signed hash for). Idempotent: re-running rewrites the
+        # same chunks.
+        import hashlib
+
+        path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(
+            os.path.dirname(__file__), "..", "docs", "art", "ram-cover.bin")
+        art = open(path, "rb").read()
+        digest = hashlib.sha256(art).hexdigest()
+        CHUNK = 64  # must match ART_CHUNK on the device (flash cell size)
+
+        def upload(p):
+            for off in range(0, len(art), CHUNK):
+                p.cmd(0x62, struct.pack("<H", off) + art[off:off + CHUNK])
+
+        # A: always, blank device pre-cut.
+        upload(a)
+        print(f"Flex A: cover uploaded ({len(art)} bytes)")
+        # B: only once it holds a pressing (the master's signed cert already
+        # commits to this sleeve's hash).
+        if b.get_info()["has_pressing"]:
+            upload(b)
+            print(f"Flex B: cover uploaded ({len(art)} bytes)")
+        print(f"local sha256 = {digest}")
 
     elif step == "collection":
         target = sys.argv[2] if len(sys.argv) > 2 else "a"
