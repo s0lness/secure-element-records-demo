@@ -310,6 +310,7 @@ version = "0.1.0"
 dependencies = [
  "gif",
  "ledger_device_sdk",
+ "ledger_secure_sdk_sys",
  "png",
 ]
 

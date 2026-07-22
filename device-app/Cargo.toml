@@ -6,6 +6,7 @@ edition = "2021"
 
 [dependencies]
 ledger_device_sdk = {version = "*", features = ["io_new"]}
+ledger_secure_sdk_sys = "*"
 
 # Vendored copy carrying the home action-button support (candidate upstream
 # PR to ledger-device-rust-sdk; keep the diff minimal and PR-shaped).
