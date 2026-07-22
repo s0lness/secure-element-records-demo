@@ -32,6 +32,7 @@ mod handlers {
     pub mod verify;
 }
 
+#[cfg(not(any(target_os = "stax", target_os = "flex")))]
 use app_ui::menu::ui_menu_main;
 use ledger_device_sdk::io::{self, init_comm, ApduHeader, Command, Reply, StatusWords};
 use session::Session;
@@ -139,12 +140,67 @@ impl TryFrom<ApduHeader> for Instruction {
 extern "C" fn sample_main(_arg0: u32) {
     let comm = init_comm(&COMM);
     comm.set_expected_cla(0xb5);
-
-    let mut home = ui_menu_main(comm);
-    home.show_and_return();
-
     let mut session = Session::new();
 
+    #[cfg(any(target_os = "stax", target_os = "flex"))]
+    library_main(comm, &mut session);
+    #[cfg(not(any(target_os = "stax", target_os = "flex")))]
+    legacy_home_main(comm, &mut session);
+}
+
+/// Serve exactly one APDU: decode, dispatch, reply. Shared by both landing
+/// loops so the wire behaviour is identical whatever is on screen.
+fn serve_one_command(comm: &mut io::Comm, session: &mut Session) {
+    let command = comm.next_command();
+    let decoded = command.decode::<Instruction>();
+    let Ok(ins) = decoded else {
+        let _ = comm.send(&[], decoded.unwrap_err());
+        return;
+    };
+    match handle_apdu(command, ins, session) {
+        Ok(reply) => {
+            let _ = reply.send(AppSW::Ok);
+        }
+        Err(sw) => {
+            let _ = comm.send(&[], sw);
+        }
+    }
+}
+
+/// The library is the landing screen: it draws, handles taps (open a record,
+/// the info page, quit), and steps aside the moment an APDU is pending so the
+/// main loop can serve the command. After every command it is redrawn from
+/// fresh NVM, so the list always tells the device's current story.
+#[cfg(any(target_os = "stax", target_os = "flex"))]
+fn library_main(comm: &mut io::Comm, session: &mut Session) {
+    use handlers::collection::{show_collection_screen, show_info_screen, show_library, LibraryAction};
+    loop {
+        loop {
+            match show_library() {
+                Ok(LibraryAction::Apdu) => break,
+                Ok(LibraryAction::Quit) => ledger_device_sdk::exit_app(0),
+                Ok(LibraryAction::Info) => show_info_screen(),
+                // Each device holds at most one record in v1, so showing the
+                // whole collection is showing exactly the tapped one.
+                Ok(LibraryAction::OpenMaster) | Ok(LibraryAction::OpenPressing) => {
+                    let _ = show_collection_screen();
+                }
+                Ok(LibraryAction::Redraw) => {}
+                // Fail closed: on a state error, stop drawing and serve the
+                // host rather than spin on a broken screen.
+                Err(_) => break,
+            }
+        }
+        serve_one_command(comm, session);
+    }
+}
+
+/// Fallback landing loop for devices without the touch library screen
+/// (the Nanos): the original home + collection button.
+#[cfg(not(any(target_os = "stax", target_os = "flex")))]
+fn legacy_home_main(comm: &mut io::Comm, session: &mut Session) {
+    let mut home = ui_menu_main(comm);
+    home.show_and_return();
     loop {
         let command = comm.next_command();
         let decoded = command.decode::<Instruction>();
@@ -152,33 +208,24 @@ extern "C" fn sample_main(_arg0: u32) {
             let _ = comm.send(&[], decoded.unwrap_err());
             continue;
         };
-
-        let status = match handle_apdu(command, ins, &mut session) {
-            Ok(reply) => {
-                let _ = reply.send(AppSW::Ok);
-                AppSW::Ok
-            }
-            Err(sw) => {
-                let _ = comm.send(&[], sw);
-                sw
-            }
-        };
-
-        // UI-gated commands leave their review screen up; restore home.
         let ui_gated = matches!(
             ins,
             Instruction::Cut
                 | Instruction::Collection
-                | Instruction::ArtTest { .. }
                 | Instruction::PairSas
                 | Instruction::PressOffer
                 | Instruction::PressAccept
                 | Instruction::ResetMaster
         );
+        match handle_apdu(command, ins, session) {
+            Ok(reply) => {
+                let _ = reply.send(AppSW::Ok);
+            }
+            Err(sw) => {
+                let _ = comm.send(&[], sw);
+            }
+        }
         if ui_gated {
-            let _ = status;
-            // Ceremonies change what the device holds; rebuild the home so
-            // the idle screen always tells the current story.
             home = ui_menu_main(comm);
             home.show_and_return();
         }

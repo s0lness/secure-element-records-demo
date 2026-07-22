@@ -356,6 +356,14 @@ unsafe extern "C" fn layout_touch_callback(token: core::ffi::c_int, _index: u8) 
     touch_result_set(Exit::Touched(token as u8));
 }
 
+/// Row tokens for the library: one per held record, small and dense so they
+/// never collide with the control tokens below.
+pub const TOKEN_MASTER: u8 = 0;
+pub const TOKEN_PRESSING: u8 = 1;
+/// Control tokens, kept well clear of the row range.
+pub const TOKEN_INFO: u8 = 250;
+pub const TOKEN_QUIT: u8 = 251;
+
 /// A screen built through the app-side `nbgl_layout` API.
 ///
 /// This is the layer that actually works from an app. The object/screen API
@@ -405,6 +413,66 @@ impl Layout {
         };
         unsafe {
             nbgl_layoutAddCenteredInfo(self.handle, &info);
+        }
+    }
+
+    /// A title bar with an optional (i) affordance in the top-right corner.
+    /// The icon must be caller-provided (from a [`ScreenArena`]): the OS's own
+    /// info glyph is declared by the bindings but is not linkable from an app.
+    /// The info button reports [`TOKEN_INFO`] when tapped.
+    pub fn header(&mut self, title: *const core::ffi::c_char, info_icon: *const nbgl_icon_details_t) {
+        let header = nbgl_layoutHeader_t {
+            type_: HEADER_TITLE,
+            separationLine: true,
+            __bindgen_anon_1: nbgl_layoutHeader_t__bindgen_ty_1 {
+                title: nbgl_layoutHeader_t__bindgen_ty_1__bindgen_ty_4 { text: title },
+            },
+        };
+        unsafe {
+            nbgl_layoutAddHeader(self.handle, &header);
+            if !info_icon.is_null() {
+                nbgl_layoutAddTopRightButton(self.handle, info_icon, TOKEN_INFO, 0);
+            }
+        }
+    }
+
+    /// A full-width tappable row: an icon on the left, a title, a status line
+    /// under it, and a chevron on the right. Reports `token` when tapped.
+    pub fn touchable_bar(
+        &mut self,
+        icon: *const nbgl_icon_details_t,
+        text: *const core::ffi::c_char,
+        sub_text: *const core::ffi::c_char,
+        token: u8,
+    ) {
+        let bar = nbgl_layoutBar_t {
+            iconLeft: icon,
+            text,
+            iconRight: ptr::null(),
+            subText: sub_text,
+            large: false,
+            token,
+            inactive: false,
+            centered: false,
+            tuneId: 0,
+        };
+        unsafe {
+            nbgl_layoutAddTouchableBar(self.handle, &bar);
+        }
+    }
+
+    /// A block of centered text with an optional smaller second line. Used for
+    /// the empty state.
+    pub fn text(&mut self, text: *const core::ffi::c_char, sub_text: *const core::ffi::c_char) {
+        unsafe {
+            nbgl_layoutAddText(self.handle, text, sub_text);
+        }
+    }
+
+    /// A full-width action bar pinned to the bottom, reporting `token`.
+    pub fn footer(&mut self, text: *const core::ffi::c_char, token: u8) {
+        unsafe {
+            nbgl_layoutAddFooter(self.handle, text, token, 0);
         }
     }
 

@@ -1,9 +1,15 @@
-use alloc::format;
-use alloc::string::String;
 use ledger_device_sdk::include_gif;
-use ledger_device_sdk::io::Comm;
-use ledger_device_sdk::nbgl::{NbglChoice, NbglGlyph, NbglHomeAndSettings};
+use ledger_device_sdk::nbgl::{NbglChoice, NbglGlyph};
 
+#[cfg(not(any(target_os = "stax", target_os = "flex")))]
+use alloc::format;
+#[cfg(not(any(target_os = "stax", target_os = "flex")))]
+use alloc::string::String;
+#[cfg(not(any(target_os = "stax", target_os = "flex")))]
+use ledger_device_sdk::io::Comm;
+#[cfg(not(any(target_os = "stax", target_os = "flex")))]
+use ledger_device_sdk::nbgl::NbglHomeAndSettings;
+#[cfg(not(any(target_os = "stax", target_os = "flex")))]
 use crate::state::Store;
 
 #[cfg(target_os = "apex_p")]
@@ -15,7 +21,9 @@ pub const RECORD: NbglGlyph =
     NbglGlyph::from_include(include_gif!("glyphs/home_nano_nbgl.png", NBGL));
 
 /// The idle screen shows what this device holds; the default tagline only
-/// appears while it holds nothing.
+/// appears while it holds nothing. Only the legacy (non-touch) landing loop
+/// uses it; Flex/Stax open on the library instead.
+#[cfg(not(any(target_os = "stax", target_os = "flex")))]
 fn tagline() -> String {
     let Ok(nvm) = Store::get() else {
         return String::from("Finite editions,\npressed in silicon.");
@@ -49,6 +57,7 @@ fn tagline() -> String {
     }
 }
 
+#[cfg(not(any(target_os = "stax", target_os = "flex")))]
 pub fn ui_menu_main(_: &mut Comm) -> NbglHomeAndSettings {
     NbglHomeAndSettings::new()
         .glyph(&RECORD)
@@ -61,10 +70,12 @@ pub fn ui_menu_main(_: &mut Comm) -> NbglHomeAndSettings {
 /// keeps pointers into its strings). Heap-allocated and tracked through an
 /// atomic so the static stays zero-initialized (.bss: this target forbids a
 /// .data section). Single UI thread.
+#[cfg(not(any(target_os = "stax", target_os = "flex")))]
 static CALLBACK_HOME: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
 
 /// Home action button: draw the collection, then put the home back up.
 /// Runs inside the NBGL event loop, no Comm in reach.
+#[cfg(not(any(target_os = "stax", target_os = "flex")))]
 fn on_my_records() {
     let _ = crate::handlers::collection::show_collection_screen();
     let home = alloc::boxed::Box::new(

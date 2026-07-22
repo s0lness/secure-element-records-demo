@@ -26,6 +26,19 @@
 
 use alloc::vec::Vec;
 
+/// Turn canonical sleeve bytes into the buffer NBGL should draw.
+///
+/// The stored (and hashed) bytes are exactly what `scripts/sleeve.py` emits: a
+/// set bit is lit art, per that tool's `1 = white` convention. But this 1bpp
+/// path renders a set bit as *black* (measured: `scripts/check-packing.py`,
+/// correlation 1.0 with `invert`). So to put white art on a black ground, the
+/// way every validated preview looks, the device inverts the bits at render
+/// time. The canonical bytes, and therefore the certificate's sleeve hash, are
+/// left untouched; only this display copy is flipped.
+pub fn to_display(canonical: &[u8]) -> Vec<u8> {
+    canonical.iter().map(|b| !b).collect()
+}
+
 /// Read pixel `(i, j)` in stored space from a packed 1bpp square.
 #[inline]
 fn get_bit(data: &[u8], n: usize, i: usize, j: usize) -> bool {

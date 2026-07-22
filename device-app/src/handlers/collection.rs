@@ -2,6 +2,7 @@ use crate::certs::parse_album_cert;
 use crate::handlers::press::fingerprint_str;
 use crate::state::{Store, PRESSED_LOG_LEN};
 use crate::AppSW;
+use alloc::ffi::CString;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -71,19 +72,19 @@ pub fn show_collection_screen() -> Result<(), AppSW> {
     let nvm = Store::get()?;
 
     // Sleeves are computed up front and kept alive for the whole call: NBGL
-    // holds a pointer into each bitmap until the screen goes away. Thumbnails
-    // rather than full size, which is all this card template has room for.
-    let half = crate::state::ART_W / 2;
+    // holds a pointer into each bitmap until the screen goes away. Full size
+    // here: this is the record card, so the sleeve gets the whole 160x160.
+    let full = crate::state::ART_W;
     let master_sleeve = if nvm.has_master == 1 {
         let album_id = crate::crypto::sha256(&[&nvm.alb_pub])?;
-        Some(crate::sleeve::decimate(&album_sleeve(&album_id), crate::state::ART_W))
+        Some(crate::sleeve::to_display(&album_sleeve(&album_id)))
     } else {
         None
     };
     let pressing_sleeve = if nvm.has_pressing == 1 {
         let album = parse_album_cert(&nvm.pressing_album_cert)?;
         let pressing = crate::certs::parse_pressing_cert(&nvm.pressing_cert, &album.albpub)?;
-        Some(crate::sleeve::decimate(&album_sleeve(&pressing.album_id), crate::state::ART_W))
+        Some(crate::sleeve::to_display(&album_sleeve(&pressing.album_id)))
     } else {
         None
     };
@@ -108,8 +109,8 @@ pub fn show_collection_screen() -> Result<(), AppSW> {
             let bitmap = master_sleeve.as_deref().unwrap_or(&[]);
             let glyph = NbglGlyph::new(
                 bitmap,
-                half as u16,
-                half as u16,
+                full as u16,
+                full as u16,
                 crate::state::ART_BPP as u8,
                 false,
             );
@@ -148,8 +149,8 @@ pub fn show_collection_screen() -> Result<(), AppSW> {
             let bitmap = pressing_sleeve.as_deref().unwrap_or(&[]);
             let glyph = NbglGlyph::new(
                 bitmap,
-                half as u16,
-                half as u16,
+                full as u16,
+                full as u16,
                 crate::state::ART_BPP as u8,
                 false,
             );
@@ -184,6 +185,123 @@ pub fn handler_collection(command: Command<'_>) -> Result<CommandResponse<'_>, A
     show_collection_screen()?;
     let response = command.into_response();
     Ok(response)
+}
+
+/// What the user asked for on the library screen.
+#[cfg(any(target_os = "stax", target_os = "flex"))]
+pub enum LibraryAction {
+    /// An APDU arrived: leave the screen so the main loop can serve it.
+    Apdu,
+    /// The "Quitter" footer: exit the app, like the standard home does.
+    Quit,
+    /// The (i) affordance.
+    Info,
+    /// A record row was tapped; open its card.
+    OpenMaster,
+    OpenPressing,
+    /// A swipe or an unmapped tap: just redraw the library.
+    Redraw,
+}
+
+/// The library: the app's landing screen. An iTunes-style list of the records
+/// this device holds, each row a decimated sleeve with its title and status,
+/// over a "Quitter" footer that really exits.
+///
+/// It runs its own event loop, and that loop yields to the host: the library
+/// is what is on screen when a ceremony begins, so it must step aside for an
+/// incoming cut / pair / press instead of deadlocking against it.
+#[cfg(any(target_os = "stax", target_os = "flex"))]
+pub fn show_library() -> Result<LibraryAction, AppSW> {
+    use crate::app_ui::library::{
+        run_event_loop, Exit, Layout, ScreenArena, TOKEN_INFO, TOKEN_MASTER, TOKEN_PRESSING,
+        TOKEN_QUIT,
+    };
+
+    let nvm = Store::get()?;
+    let n = crate::state::ART_W;
+    let half = n / 2;
+
+    // Everything the layout points at must outlive the draw and the loop.
+    let mut arena = ScreenArena::new();
+    let mut strings: Vec<CString> = Vec::new();
+    let mut cstr = |s: String| -> *const core::ffi::c_char {
+        let owned = CString::new(s.replace('\0', " ")).unwrap_or_default();
+        strings.push(owned);
+        strings[strings.len() - 1].as_ptr()
+    };
+
+    let mut layout = Layout::new();
+    layout.header(cstr(String::from("Presse")), core::ptr::null());
+
+    let mut has_any = false;
+
+    if nvm.has_master == 1 {
+        let title = title_str(&nvm.title, nvm.title_len)?;
+        let album_id = crate::crypto::sha256(&[&nvm.alb_pub])?;
+        let thumb = crate::sleeve::to_display(&crate::sleeve::decimate(&album_sleeve(&album_id), n));
+        let icon = arena.icon(thumb, half as u16, half as u16, ledger_secure_sdk_sys::NBGL_BPP_1);
+        let status = if nvm.counter == 0 {
+            String::from("Sold out")
+        } else {
+            format!("{} of {} left to press", nvm.counter, nvm.edition)
+        };
+        layout.touchable_bar(icon, cstr(String::from(title)), cstr(status), TOKEN_MASTER);
+        has_any = true;
+    }
+
+    if nvm.has_pressing == 1 {
+        let album = parse_album_cert(&nvm.pressing_album_cert)?;
+        let title = title_str(&album.title, album.title_len)?;
+        let pressing = crate::certs::parse_pressing_cert(&nvm.pressing_cert, &album.albpub)?;
+        let thumb =
+            crate::sleeve::to_display(&crate::sleeve::decimate(&album_sleeve(&pressing.album_id), n));
+        let icon = arena.icon(thumb, half as u16, half as u16, ledger_secure_sdk_sys::NBGL_BPP_1);
+        let status = format!("{} of {}, on this device", pressing.number, pressing.edition);
+        layout.touchable_bar(
+            icon,
+            cstr(String::from(title)),
+            cstr(status),
+            TOKEN_PRESSING,
+        );
+        has_any = true;
+    }
+
+    if !has_any {
+        layout.text(
+            cstr(String::from("No records yet")),
+            cstr(String::from("Cut a master or receive a pressing.")),
+        );
+    }
+
+    layout.footer(cstr(String::from("Quitter")), TOKEN_QUIT);
+    layout.draw();
+
+    let action = match run_event_loop() {
+        Exit::Apdu => LibraryAction::Apdu,
+        Exit::Touched(TOKEN_QUIT) => LibraryAction::Quit,
+        Exit::Touched(TOKEN_INFO) => LibraryAction::Info,
+        Exit::Touched(TOKEN_PRESSING) => LibraryAction::OpenPressing,
+        Exit::Touched(TOKEN_MASTER) => LibraryAction::OpenMaster,
+        // Any other tap or a swipe on the list just redraws the library.
+        _ => LibraryAction::Redraw,
+    };
+    // Explicitly release the layout before the arena and strings it points at.
+    drop(layout);
+    Ok(action)
+}
+
+/// The (i) page: what the app is, and its version. Reuses the proven review
+/// widget rather than another raw layout.
+#[cfg(any(target_os = "stax", target_os = "flex"))]
+pub fn show_info_screen() {
+    let names = [String::from("Presse"), String::from("Editions")];
+    let values = [
+        String::from(env!("CARGO_PKG_VERSION")),
+        String::from("Finite, pressed in silicon."),
+    ];
+    NbglGenericReview::new()
+        .add_content(fields_page(&names, &values))
+        .show_from_callback("Back");
 }
 
 /// ART_TEST: development probe for the raw-NBGL path. P1 = 0 draws a
