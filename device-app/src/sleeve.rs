@@ -87,46 +87,58 @@ pub fn decimate(src: &[u8], n: usize) -> Vec<u8> {
 /// sleeve an artist can store (see `docs/protocol.md`). Computing it also
 /// makes every album distinct instead of one of eight.
 ///
-/// The design is a record seen face-on: an outer rim, grooves whose spacing
-/// is set by the id, and a centre label with a spindle hole. Two id bits
-/// break the symmetry so two albums never look alike.
+/// A vinyl record seen face-on: a black disc on a light ground, ringed by a
+/// solid rim, cut by fine grooves, and centred on a solid label with a punched
+/// spindle hole. Matches the aesthetic of `glyphs/vinyl_64x64.gif`. Reads as a
+/// record, not a target: the vinyl body stays mostly black, and the grooves are
+/// single-pixel rings spaced `pitch` apart, never the equal light/dark bands
+/// that made the old placeholder look like radar.
+///
+/// The groove pitch and the label radius are derived from the album id, and one
+/// id bit adds a thin ring inside the label, so no two editions render the same
+/// face while every one still reads as a record.
+///
+/// Returns canonical bytes (a set bit is white art, per the module's polarity
+/// note); the caller inverts through [`to_display`] before drawing.
 pub fn fallback_sleeve(n: usize, album_id: &[u8; 32]) -> Vec<u8> {
     let mut out = alloc::vec![0u8; n * n / 8];
     let seed = album_id[0];
     let centre = (n / 2) as i32;
     let radius = centre - 2;
-    // Groove pitch and label size vary with the id, within ranges that stay
-    // legible once the sleeve is decimated to a thumbnail.
-    let pitch = 4 + (seed & 3) as i32 * 2;
+    // Groove pitch and label size vary with the id, within ranges that keep the
+    // record legible once decimated to a library thumbnail.
+    let pitch = 5 + (seed & 3) as i32; // 5..8 px between grooves
     let label_r = radius / 3 + ((seed >> 2) & 3) as i32 * 2;
-    let notch = (seed >> 4) & 3;
+    let hole_r = 3;
+    // One id bit splits the label with a thin groove, a subtle per-album detail.
+    let label_ring = (seed >> 4) & 1 == 1;
+    let ring_r = label_r / 2;
 
     for i in 0..n {
         for j in 0..n {
             let dx = i as i32 - centre;
             let dy = j as i32 - centre;
             let d2 = dx * dx + dy * dy;
-            if d2 > radius * radius {
-                continue; // outside the disc: leave it dark
-            }
             // Integer distance, good enough at this scale and free of floats,
             // which are banned on this target.
             let mut d = 0i32;
             while (d + 1) * (d + 1) <= d2 {
                 d += 1;
             }
-            let lit = if d <= label_r {
-                // Centre label: solid, with a spindle hole punched out.
-                d > 3
-            } else if d >= radius - 2 {
-                true // outer rim
+            // In canonical space a set bit is white: the ground and the label
+            // are white, the vinyl body is left black with fine white grooves.
+            let white = if d > radius {
+                true // light ground around the disc
+            } else if d <= hole_r {
+                false // spindle hole
+            } else if d <= label_r {
+                !(label_ring && d == ring_r) // solid label, maybe one groove
+            } else if d <= label_r + 1 || d >= radius - 1 {
+                false // crisp black gap round the label, solid black outer rim
             } else {
-                // Grooves, interrupted in one quadrant so the art is
-                // asymmetric and the id is visible at a glance.
-                let quadrant = ((dx > 0) as u8) | (((dy > 0) as u8) << 1);
-                quadrant != notch && (d / pitch) % 2 == 0
+                d % pitch == 0 // fine white grooves on the black vinyl
             };
-            if lit {
+            if white {
                 set_bit(&mut out, n, i, j);
             }
         }
