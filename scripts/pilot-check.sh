@@ -1,10 +1,11 @@
 #!/bin/bash
-# Dry-run the piloted demo sequence end to end against fresh emulators, using
-# the same commands the user will drive by hand: demo_steps.py for each beat
-# (auto-routes through the cockpit on :5050 when it is up) and tap.sh to play
-# the finger. Proves the Task 3 flow -- art BEFORE cut, no seal -- works from
-# the relay tooling. Does NOT leave state behind: the caller resets with
-# emu-up.sh afterward.
+# Dry-run the piloted demo end to end against fresh emulators, using the same
+# commands the user drives by hand: demo_steps.py per beat (auto-routes through
+# the cockpit on :5050 when up) and tap.sh to play the finger. The flow is
+# art (to A) -> cut -> pair -> press -> verify: the press now carries the
+# sleeve A->B by itself, so there is NO manual re-upload to B and NO
+# radar-fallback flash. Captures B's library the moment the pressing lands, as
+# proof. Does NOT leave state behind: the caller resets with emu-up.sh.
 set -e
 source "$(dirname "$0")/env.sh"
 cd /mnt/c/Users/sylve/projects/presse
@@ -33,12 +34,15 @@ echo "=== pair (tap Words match on both) ==="
 python3 relay/demo_steps.py pair &
 PID=$!; sleep 3.5; tap 5001 "Words match"; tap 5002 "Words match"; wait $PID
 
-echo "=== press (tap Press this copy on A, Receive it on B) ==="
+echo "=== press (tap Press this copy on A, Receive it on B; sleeve rides along) ==="
 python3 relay/demo_steps.py press &
 PID=$!; sleep 2.5; tap 5001 "Press this copy"; sleep 2.5; tap 5002 "Receive it"; wait $PID
 
-echo "=== art again (now B holds a pressing -> uploads to B too) ==="
-python3 relay/demo_steps.py art "$RAM"
+echo "=== B's library the instant the pressing landed (no manual step) ==="
+# The cover must already be the RAM sleeve, not the generative radar.
+sleep 1
+curl -s "http://127.0.0.1:5002/screenshot" -o docs/screens/receiver-cover-on-press.png
+echo "saved docs/screens/receiver-cover-on-press.png"
 
 echo "=== verify ==="
 python3 relay/demo_steps.py verify

@@ -69,13 +69,15 @@ def test_mitm_produces_different_sas_words(ceremony):
     # The words each device is about to show are already determined.
     assert to_a.sas != to_b.sas, "MITM accidentally matched 4-byte SAS (p=2^-32)"
 
+    since_a = len(master.dev.events())
+    since_b = len(receiver.dev.events())
     tm, _ = master.dev.apdu_async_start(apdu_hex(INS_PAIR_SAS))
     tr, _ = receiver.dev.apdu_async_start(apdu_hex(INS_PAIR_SAS))
     assert master.dev.wait_for_text("Words match")
     assert receiver.dev.wait_for_text("Words match")
 
-    words_a = sas_words_on_screen(master.dev)
-    words_b = sas_words_on_screen(receiver.dev)
+    words_a = sas_words_on_screen(master.dev, since_a)
+    words_b = sas_words_on_screen(receiver.dev, since_b)
     assert len(words_a) == 4 and len(words_b) == 4
     assert words_a != words_b, "screens agree under MITM: SAS is broken"
 

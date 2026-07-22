@@ -2,12 +2,16 @@
 Each subcommand is one relay action; UI-gated steps block until someone taps
 the device screen (in the browser page or on real glass).
 
+    python3 relay/demo_steps.py art [path]  # upload the sleeve to A (pre-cut)
     python3 relay/demo_steps.py cut [title] [edition]
-    python3 relay/demo_steps.py pair       # handshake, then SAS on both
-    python3 relay/demo_steps.py press
+    python3 relay/demo_steps.py pair        # handshake, then SAS on both
+    python3 relay/demo_steps.py press       # also carries the sleeve A->B
     python3 relay/demo_steps.py verify
 
-Relay state (public byte blobs only) parks in /tmp/presse-relay/."""
+The sleeve rides along with the press (GET_ART on A -> SET_ART on B), so the
+receiver's cover is present the moment the pressing lands: no manual re-upload,
+no generative-fallback flash. Relay state (public byte blobs only) parks in
+/tmp/presse-relay/."""
 
 import os
 import struct
@@ -22,6 +26,7 @@ from presse_client import (  # noqa: E402
     Presse,
     apdu_hex,
     split_sw,
+    carry_sleeve,
     sas_words_on_screen,
     verify_chain,
     verify_possession,
@@ -156,14 +161,20 @@ def main():
         _, sw = gated(b, INS_PRESS_ACCEPT, cert_mac, "Receive ", "Flex B")
         assert sw == SW_OK, f"refused ({sw})"
         print(f"pressed. {a.get_info()['counter']} remain in the master.")
+        # Carry the sleeve along so B renders the real cover the instant the
+        # pressing lands, never the generative fallback. Skipped silently for a
+        # sleeveless edition.
+        if a.get_info()["has_master"]:
+            sha = carry_sleeve(a, b)
+            if sha:
+                print(f"sleeve carried A->B (sha {sha[:12]}…)")
 
     elif step == "art":
-        # Upload the cover BEFORE the cut. There is no seal step any more: the
-        # cut hashes whatever is in the art region into the signed album cert,
-        # so A must receive the sleeve while still blank and pre-cut. B only
-        # needs it re-uploaded once it holds a pressing (to render the cover it
-        # already has a signed hash for). Idempotent: re-running rewrites the
-        # same chunks.
+        # Upload the cover to A BEFORE the cut. There is no seal step: the cut
+        # hashes whatever is in the art region into the signed album cert, so A
+        # must receive the sleeve while still blank and pre-cut. B needs no
+        # manual upload -- the press carries the sleeve across automatically.
+        # Idempotent: re-running rewrites the same chunks.
         import hashlib
 
         path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(
@@ -172,18 +183,9 @@ def main():
         digest = hashlib.sha256(art).hexdigest()
         CHUNK = 64  # must match ART_CHUNK on the device (flash cell size)
 
-        def upload(p):
-            for off in range(0, len(art), CHUNK):
-                p.cmd(0x62, struct.pack("<H", off) + art[off:off + CHUNK])
-
-        # A: always, blank device pre-cut.
-        upload(a)
+        for off in range(0, len(art), CHUNK):
+            a.cmd(0x62, struct.pack("<H", off) + art[off:off + CHUNK])
         print(f"Flex A: cover uploaded ({len(art)} bytes)")
-        # B: only once it holds a pressing (the master's signed cert already
-        # commits to this sleeve's hash).
-        if b.get_info()["has_pressing"]:
-            upload(b)
-            print(f"Flex B: cover uploaded ({len(art)} bytes)")
         print(f"local sha256 = {digest}")
 
     elif step == "collection":

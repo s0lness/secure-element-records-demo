@@ -267,6 +267,28 @@ def upload_art(presse: "Presse", art_bytes: bytes):
         presse.cmd(INS_SET_ART, payload)
 
 
+def read_art(presse: "Presse") -> bytes:
+    """Read a device's stored sleeve back over GET_ART, chunk by chunk."""
+    art = bytearray()
+    for chunk in range((ART_LEN + ART_CHUNK - 1) // ART_CHUNK):
+        art += presse.cmd(INS_GET_ART, p1=chunk)
+    return bytes(art)
+
+
+def carry_sleeve(src: "Presse", dst: "Presse"):
+    """Copy src's sleeve to dst over the relay (GET_ART then SET_ART).
+
+    The bytes are public and dst validates them against the sleeve hash the
+    album certificate already commits to, so an untrusted relay carrying them
+    is fine. Returns the sha256 hex, or None when src has no sleeve (blank
+    region): nothing to carry, so the caller stays silent."""
+    art = read_art(src)
+    if not any(art):
+        return None
+    upload_art(dst, art)
+    return hashlib.sha256(art).hexdigest()
+
+
 def verify_possession(presse: Presse, pressing_cert: bytes):
     """Challenge-response: the device proves it holds the bound key, live."""
     import os

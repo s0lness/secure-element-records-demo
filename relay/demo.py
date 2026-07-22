@@ -20,6 +20,7 @@ from presse_client import (  # noqa: E402
     Presse,
     apdu_hex,
     split_sw,
+    carry_sleeve,
     verify_chain,
     verify_possession,
     INS_PAIR_COMMIT,
@@ -137,6 +138,14 @@ def main():
     print("   >> confirm the receive on Flex B")
     _, sw = split_sw(b.dev.apdu(apdu_hex(INS_PRESS_ACCEPT, cert_mac)))
     assert sw == SW_OK, f"receive refused: {sw}"
+
+    # Carry the sleeve A->B so B shows the real cover the instant the pressing
+    # lands, never the generative fallback. Public bytes; B validates them
+    # against the signed cert hash. Skipped for a sleeveless edition.
+    if a.get_info()["has_master"]:
+        sha = carry_sleeve(a, b)
+        if sha:
+            print(f"   sleeve carried A->B (sha {sha[:12]}…)")
 
     info_a = a.get_info()
     print(f"   pressed. {info_a['counter']} of {info_a['edition']} remain in the master.")
